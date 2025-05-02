@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN">
+    <Appenders>
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout>
+                <charset>CP866</charset>
+                <pattern>%msg%n</pattern>
+            </PatternLayout>
+            <ThresholdFilter level="INFO" onMatch="ACCEPT" onMismatch="DENY"/>
+        </Console>
+        <File name="File" fileName="logs/bitbotx.log">
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n"/>
+        </File>
+    </Appenders>
+    <Loggers>
+        <Logger name="ru.spbstu.telematics.bitbotx.CryptoInformation" level="info" additivity="false">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="File"/>
+        </Logger>
+        <Logger name="ru.spbstu.telematics.bitbotx.PriceFetcher" level="info" additivity="false">
+            <AppenderRef ref="File"/>
+        </Logger>
+        <Logger name="ru.spbstu.telematics.bitbotx.AlertsHandling" level="info" additivity="false">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="File"/>
+        </Logger>
+        <Root level="debug">
+            <AppenderRef ref="File"/>
+        </Root>
+    </Loggers>
+</Configuration> 
