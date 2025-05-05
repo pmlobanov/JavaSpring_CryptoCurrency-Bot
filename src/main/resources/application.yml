@@ -1,0 +1,13 @@
+telegram:
+  bot:
+    token: "7577873660:AAHbgfDR6DU9KC50gb6vD2j3qhLTdc6rG5M"
+    username: "Crypto_Currency_BitX_bot"
+
+kafka:
+  bootstrap-servers: "localhost:29092"
+  consumer:
+    group-id: "telegram-bot-group"
+    auto-offset-reset: "earliest"
+  topics:
+    incoming: "telegram-incoming-messages"
+    outgoing: "telegram-outgoing-messages"
