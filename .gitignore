@@ -40,12 +40,9 @@ bin/
 
 ### Mac OS ###
 .DS_Store
-/build.gradle.kts
-/build.gradle.kts
 /gradlew
 /gradlew.bat
 /settings.gradle.kts
-/build.gradle.kts
 /gradlew
 /gradlew.bat
 /settings.gradle.kts

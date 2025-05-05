@@ -5,7 +5,9 @@ import org.springframework.data.annotation.PersistenceConstructor;
 import org.springframework.data.mongodb.core.mapping.Document;
 import ru.spbstu.telematics.java.DB.currencies.CryptoCurrency;
 import ru.spbstu.telematics.java.DB.currencies.FiatCurrency;
+import ru.spbstu.telematics.java.DB.exceptions.NoSuchRightsExeption;
 
+import java.security.PublicKey;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -40,6 +42,24 @@ public class User {
     private String userTgName;
     private FiatCurrency fiatCurrency;
     private CryptoCurrency defaultCryptoCurrrency;
+
+    public Boolean getAdmin() {
+        return isAdmin;
+    }
+
+    public void setAdmin(Boolean admin) {
+        isAdmin = admin;
+        //с большой силой приходит большая ответсвенность
+    }
+
+    private Boolean isAdmin;
+
+    public PublicKey getPublicKey() {
+        if(!this.isAdmin) throw new NoSuchRightsExeption("User doesn't have Admin rights");
+        return publicKey;
+    }
+
+    private PublicKey publicKey;
 
     public void setNotificationIds(List<String> notificationIds) {
         this.notificationIds = notificationIds;
@@ -182,15 +202,17 @@ public class User {
      * Возвращает строковое представление пользователя.
      * @return строковое описание со всеми полями
      */
+
     @Override
     public String toString() {
         return "User{" +
-                "id='" + id + '\'' +
-                ", userTgName='" + userTgName + '\'' +
-                ", fiatCurrency=" + fiatCurrency +
+                "isAdmin=" + isAdmin +
                 ", defaultCryptoCurrrency=" + defaultCryptoCurrrency +
-                ", portfolioIds=" + portfolioIds +
-                ", notificationIds=" + notificationIds +
+                ", fiatCurrency=" + fiatCurrency +
+                ", userTgName='" + userTgName + '\'' +
+                ", id='" + id + '\'' +
                 '}';
     }
+
+
 }

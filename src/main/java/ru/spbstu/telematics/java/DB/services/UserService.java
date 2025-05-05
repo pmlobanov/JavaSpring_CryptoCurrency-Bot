@@ -2,11 +2,8 @@ package ru.spbstu.telematics.java.DB.services;
 
 import com.mongodb.client.result.UpdateResult;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
-import org.springframework.data.mongodb.core.aggregation.AggregationResults;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
@@ -17,12 +14,14 @@ import ru.spbstu.telematics.java.DB.collections.Portfolio;
 import ru.spbstu.telematics.java.DB.collections.User;
 import ru.spbstu.telematics.java.DB.currencies.CryptoCurrency;
 import ru.spbstu.telematics.java.DB.currencies.FiatCurrency;
+import ru.spbstu.telematics.java.DB.encryption.PrivateKeyProvider;
+import ru.spbstu.telematics.java.DB.encryption.RsaCryptor;
+import ru.spbstu.telematics.java.DB.exceptions.NoSuchRightsExeption;
 import ru.spbstu.telematics.java.DB.repositories.UserRepository;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.NoSuchElementException;
+import java.security.PrivateKey;
+import java.security.PublicKey;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -44,9 +43,10 @@ public class UserService {
     private final UserRepository userRepository;
     @Autowired
     private final MongoTemplate mongoTemplate;
-
     @Autowired
     private PortfolioService portfolioService;
+    @Autowired
+    private ApiKeyService apiKeyService;
     @Autowired
     private NotificationService notificationService;
 
@@ -210,4 +210,34 @@ public class UserService {
         // 3. Получаем все уведомления по списку ID
         return user.getNotificationIds().stream().map(id -> notificationService.getNotification(id)).toList();
     }
+
+    public void updateUserRights(String userId, Boolean newRight){
+        Query query = new Query(Criteria.where("id").is(userId));
+        Update update = new Update().set("isAdmin", newRight);
+        mongoTemplate.updateFirst(query, update, User.class);
+    }
+
+    public List<User> getUsersList(String adminUserId){
+            User adminUser = userRepository.findById(adminUserId).orElseThrow();
+            if(adminUser.getAdmin().equals(false)){
+                throw new NoSuchRightsExeption("User doesn't have admin privileges");
+            }
+            return userRepository.findAll();
+    }
+
+    public String getApiKey(String adminUserId) throws Exception {
+        User adminUser = userRepository.findById(adminUserId).orElseThrow(() ->
+                new NoSuchElementException("No user with such Id"));
+        if(!adminUser.getAdmin()) throw new NoSuchRightsExeption("User doesn't have admin privileges");
+        return apiKeyService.getApikey();
+    }
+
+    public void setApiKey(String adminUserId, String newApiKey) throws Exception {
+        User adminUser = userRepository.findById(adminUserId).orElseThrow(() ->
+                new NoSuchElementException("No user with such Id"));
+        if(!adminUser.getAdmin()) throw new NoSuchRightsExeption("User doesn't have admin privileges");
+        apiKeyService.setApiKey(newApiKey);
+    }
+
+
 }
