@@ -1,14 +1,10 @@
 package spbstu.mcs.telegramBot.cryptoApi;
 import lombok.extern.slf4j.Slf4j;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
-import org.springframework.scheduling.annotation.Async;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Flux;
+import reactor.util.retry.Retry;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -26,10 +22,9 @@ import java.util.TreeSet;
 import java.util.ArrayList;
 import java.util.stream.Collectors;
 
-import spbstu.mcs.telegramBot.cryptoApi.model.Currency.Crypto;
-import spbstu.mcs.telegramBot.cryptoApi.model.Currency.Fiat;
-import spbstu.mcs.telegramBot.cryptoApi.model.Currency;
-import spbstu.mcs.telegramBot.service.KafkaConsumerService;
+import spbstu.mcs.telegramBot.model.Currency.Crypto;
+import spbstu.mcs.telegramBot.model.Currency.Fiat;
+import spbstu.mcs.telegramBot.model.Currency;
 
 /**
  * Сервис для выполнения финансовых расчетов и мониторинга цен.
@@ -37,21 +32,23 @@ import spbstu.mcs.telegramBot.service.KafkaConsumerService;
  * - Сравнения валютных пар
  * - Получения истории цен
  */
-
-@Component
+@Service
+@Slf4j
 public class CryptoInformation {
-    private static final Logger log = LoggerFactory.getLogger(BitBotX.class);
     private static final int PRICE_SCALE = 8;
     private static final int PERCENT_SCALE = 2;
     
-    private final PriceFetcher priceFetcher;
     private final ObjectMapper objectMapper;
     private final CurrencyConverter currencyConverter;
-    
-    public CryptoInformation(PriceFetcher priceFetcher, ObjectMapper objectMapper, CurrencyConverter currencyConverter) {
-        this.priceFetcher = priceFetcher;
+    private final PriceFetcher priceFetcher;
+
+    @Autowired
+    public CryptoInformation(ObjectMapper objectMapper,
+                           CurrencyConverter currencyConverter,
+                           PriceFetcher priceFetcher) {
         this.objectMapper = objectMapper;
         this.currencyConverter = currencyConverter;
+        this.priceFetcher = priceFetcher;
     }
     
     /**
@@ -64,9 +61,6 @@ public class CryptoInformation {
      * @param period Период сравнения (например, "3d", "6h", "30m")
      * @return Mono<String> JSON-строка с результатами сравнения
      */
-    @Async
-    @Transactional
-    @PreAuthorize("hasRole('PRICE_READER')")
     public Mono<String> compareCurrencies(Crypto crypto1, Crypto crypto2, String period) {
         return currencyConverter.getUsdToFiatRate(Fiat.getCurrentFiat())
                 .flatMap(exchangeRate -> 
@@ -120,9 +114,13 @@ public class CryptoInformation {
                                 BigDecimal currentRatio = currentPrice1.divide(currentPrice2, PRICE_SCALE, RoundingMode.HALF_UP);
                                 BigDecimal historicRatio = historicPrice1.divide(historicPrice2, PRICE_SCALE, RoundingMode.HALF_UP);
                                 
+                                // Format ratios based on their values
+                                String formattedCurrentRatio = formatRatio(currentRatio);
+                                String formattedHistoricRatio = formatRatio(historicRatio);
+                                
                                 ObjectNode ratioNode = objectMapper.createObjectNode();
-                                ratioNode.put("currentRatio", currentRatio.setScale(PERCENT_SCALE, RoundingMode.HALF_UP).toString());
-                                ratioNode.put("historicRatio", historicRatio.setScale(PERCENT_SCALE, RoundingMode.HALF_UP).toString());
+                                ratioNode.put("currentRatio", formattedCurrentRatio);
+                                ratioNode.put("historicRatio", formattedHistoricRatio);
                                 ratioNode.put("change", calculateChange(currentRatio, historicRatio));
                                 result.set("ratio", ratioNode);
                                 
@@ -146,9 +144,6 @@ public class CryptoInformation {
      * @param period Период для получения истории цен
      * @return Mono<String> с историей цен
      */
-    @Async
-    @Transactional
-    @PreAuthorize("hasRole('PRICE_READER')")
     public Mono<String> showPriceHistory(String period) {
         var intervalPoints = calculateIntervalAndPoints(period);
         long intervalMillis = intervalPoints[0];
@@ -169,13 +164,19 @@ public class CryptoInformation {
                                     .multiply(exchangeRate)
                                     .setScale(2, RoundingMode.HALF_UP);
                             
-                    Flux<Long> timestamps = Flux.range(1, points - 1)
+                            // Генерируем все точки, включая текущую и самую старую
+                            Flux<Long> timestamps = Flux.range(0, points + 1)
                                     .map(i -> currentTimestamp - (i * intervalMillis))
                             .map(ts -> ts / 1000);
                     
-                            // Получаем исторические цены
+                            // Получаем исторические цены с повторными попытками
                             return timestamps.flatMap(ts -> 
                                 priceFetcher.getSymbolPriceByTime(currentCrypto, ts)
+                                    .retryWhen(Retry.backoff(3, Duration.ofMillis(500))
+                                        .doBeforeRetry(signal -> 
+                                            log.warn("Retrying after error: {}", signal.failure().getMessage())
+                                        )
+                                    )
                                     .flatMap(json -> Mono.fromCallable(() -> {
                                         JsonNode node = objectMapper.readTree(json);
                                         BigDecimal price = new BigDecimal(node.get("price").asText());
@@ -196,6 +197,14 @@ public class CryptoInformation {
                             .collectList()
                             .map(historyNodes -> {
                                 try {
+                                    // Сортируем точки по времени (от старых к новым)
+                                    historyNodes.sort((a, b) -> 
+                                        Long.compare(
+                                            a.get("timestamp").asLong(),
+                                            b.get("timestamp").asLong()
+                                        )
+                                    );
+                                    
                                     // Формируем результат
                                     ObjectNode result = objectMapper.createObjectNode();
                                     result.put("symbol", currentCrypto.getCode() + "-" + currentFiat.getCode());
@@ -207,6 +216,34 @@ public class CryptoInformation {
                                     ArrayNode historyArray = objectMapper.createArrayNode();
                                     historyNodes.forEach(historyArray::add);
                                     result.set("history", historyArray);
+                                    
+                                    // Находим первую и последнюю цены
+                                    BigDecimal firstPrice = new BigDecimal(historyNodes.get(0).get("price").asText());
+                                    BigDecimal lastPrice = new BigDecimal(historyNodes.get(historyNodes.size() - 1).get("price").asText());
+                                    
+                                    // Находим минимальную и максимальную цены
+                                    BigDecimal minPrice = historyNodes.stream()
+                                            .map(node -> new BigDecimal(node.get("price").asText()))
+                                            .min(BigDecimal::compareTo)
+                                            .orElse(BigDecimal.ZERO);
+                                            
+                                    BigDecimal maxPrice = historyNodes.stream()
+                                            .map(node -> new BigDecimal(node.get("price").asText()))
+                                            .max(BigDecimal::compareTo)
+                                            .orElse(BigDecimal.ZERO);
+                                    
+                                    // Рассчитываем изменение в процентах
+                                    BigDecimal percentChange = lastPrice.subtract(firstPrice)
+                                            .divide(firstPrice, 4, RoundingMode.HALF_UP)
+                                            .multiply(new BigDecimal("100"))
+                                            .setScale(2, RoundingMode.HALF_UP);
+                                    
+                                    // Добавляем новые метрики
+                                    result.put("firstPrice", firstPrice.toString());
+                                    result.put("lastPrice", lastPrice.toString());
+                                    result.put("percentChange", percentChange.toString());
+                                    result.put("minPrice", minPrice.toString());
+                                    result.put("maxPrice", maxPrice.toString());
                                     
                                     String json = objectMapper.writeValueAsString(result);
                                     log.info("Price history: {}", json);
@@ -226,9 +263,6 @@ public class CryptoInformation {
      *
      * @return Mono<String> JSON-строка с текущей ценой
      */
-    @Async
-    @Transactional
-    @PreAuthorize("hasRole('PRICE_READER')")
     public Mono<String> showCurrentPrice() {
         Crypto currentCrypto = Crypto.getCurrentCrypto();
         Fiat currentFiat = Fiat.getCurrentFiat();
@@ -248,14 +282,15 @@ public class CryptoInformation {
                                         .multiply(exchangeRate)
                                         .setScale(2, RoundingMode.HALF_UP);
                                 
+                                // Формируем новый JSON с ценой в текущей фиатной валюте
                                 ObjectNode result = objectMapper.createObjectNode();
-                                result.put("symbol", symbol.replace("USDT", currentFiat.getCode()));
+                                result.put("symbol", currentCrypto.getCode() + "-" + currentFiat.getCode());
                                 result.put("price", priceInFiat.toString());
                                 result.put("timestamp", timestamp);
                                 
-                                String json = objectMapper.writeValueAsString(result);
-                                log.info("Current price: {}", json);
-                                return Mono.just(json);
+                                String resultJson = objectMapper.writeValueAsString(result);
+                                log.info("Current price: {}", resultJson);
+                                return Mono.just(resultJson);
                             } catch (Exception e) {
                                 log.error("Error processing current price: {}", e.getMessage());
                                 return Mono.error(e);
@@ -265,70 +300,105 @@ public class CryptoInformation {
     }
     
     private Mono<JsonNode> getPriceData(Crypto crypto, String period) {
-        long periodMillis = periodToMillis(period);
-        
         return priceFetcher.getCurrentPrice(crypto)
-                .flatMap(currentJson -> Mono.fromCallable(() -> objectMapper.readTree(currentJson))
-                .flatMap(currentNode -> {
-                    BigDecimal currentPrice = new BigDecimal(currentNode.get("price").asText());
-                    long currentTimestamp = currentNode.get("timestamp").asLong() * 1000;
-                    
-                    return priceFetcher.getSymbolPriceByTime(crypto, (currentTimestamp - periodMillis) / 1000)
-                        .flatMap(historicJson -> Mono.fromCallable(() -> {
-                            JsonNode historicNode = objectMapper.readTree(historicJson);
-                            BigDecimal historicPrice = new BigDecimal(historicNode.get("price").asText());
-                            long historicTimestamp = historicNode.get("timestamp").asLong() * 1000;
-                            
-                            // Создаем JSON-объект с данными
-                            ObjectNode data = objectMapper.createObjectNode();
-                            data.put("symbol", crypto.getCode());
-                            data.put("currentPrice", currentPrice.toString());
-                            data.put("historicPrice", historicPrice.toString());
-                            data.put("currentTimestamp", currentTimestamp);
-                            data.put("historicTimestamp", historicTimestamp);
-                            
-                            return data;
-                        }));
-                }));
+                .flatMap(currentJson -> {
+                    try {
+                        JsonNode currentNode = objectMapper.readTree(currentJson);
+                        long currentTimestamp = currentNode.get("timestamp").asLong() * 1000;
+                        long historicTimestamp = currentTimestamp - periodToMillis(period);
+                        
+                        return priceFetcher.getSymbolPriceByTime(crypto, historicTimestamp)
+                                .flatMap(historicJson -> {
+                                    try {
+                                        JsonNode historicNode = objectMapper.readTree(historicJson);
+                                        
+                                        ObjectNode result = objectMapper.createObjectNode();
+                                        result.put("currentPrice", currentNode.get("price").asText());
+                                        result.put("currentTimestamp", currentTimestamp);
+                                        result.put("historicPrice", historicNode.get("price").asText());
+                                        result.put("historicTimestamp", historicTimestamp);
+                                        
+                                        return Mono.just(result);
+                                    } catch (Exception e) {
+                                        log.error("Error processing historic price data: {}", e.getMessage());
+                                        return Mono.error(e);
+                                    }
+                                });
+                    } catch (Exception e) {
+                        log.error("Error processing current price data: {}", e.getMessage());
+                        return Mono.error(e);
+                    }
+                });
     }
     
     private String calculateChange(BigDecimal current, BigDecimal historic) {
         if (historic.compareTo(BigDecimal.ZERO) == 0) {
             return "0.00";
         }
-        return current.subtract(historic)
-                .divide(historic, PRICE_SCALE, RoundingMode.HALF_UP)
+        BigDecimal change = current.subtract(historic)
+                .divide(historic, PERCENT_SCALE + 2, RoundingMode.HALF_UP)
                 .multiply(new BigDecimal("100"))
-                .setScale(PERCENT_SCALE, RoundingMode.HALF_UP)
-                .toString();
+                .setScale(PERCENT_SCALE, RoundingMode.HALF_UP);
+        return change.toString();
+    }
+    
+    private String formatRatio(BigDecimal ratio) {
+        if (ratio.compareTo(BigDecimal.ONE) >= 0) {
+            // If ratio >= 1, show 2 decimal places
+            return ratio.setScale(4, RoundingMode.HALF_UP).toString();
+        } else {
+            // If ratio < 1, show up to 2 significant digits after decimal point
+            String ratioStr = ratio.toString();
+            int decimalIndex = ratioStr.indexOf('.');
+            if (decimalIndex == -1) return ratioStr;
+            
+            // Count leading zeros after decimal point
+            int leadingZeros = 0;
+            for (int i = decimalIndex + 1; i < ratioStr.length(); i++) {
+                if (ratioStr.charAt(i) == '0') {
+                    leadingZeros++;
+                } else {
+                    break;
+                }
+            }
+            
+            // Show 2 significant digits after the last leading zero
+            int totalDigits = leadingZeros + 4;
+            return ratio.setScale(totalDigits, RoundingMode.HALF_UP).toString();
+        }
     }
     
     private long periodToMillis(String period) {
-        if (period == null || period.isEmpty()) {
-            throw new IllegalArgumentException("Period cannot be null or empty");
-        }
-
-        char unit = period.charAt(period.length() - 1);
+        String unit = period.substring(period.length() - 1);
         int value = Integer.parseInt(period.substring(0, period.length() - 1));
-
+        
         return switch (unit) {
-            case 'm' -> value * 60L * 1000L;
-            case 'h' -> value * 60L * 60L * 1000L;
-            case 'd' -> value * 24L * 60L * 60L * 1000L;
-            case 'w' -> value * 7L * 24L * 60L * 60L * 1000L;
-            case 'M' -> value * 30L * 24L * 60L * 60L * 1000L;
-            default -> throw new IllegalArgumentException("Unknown period unit: " + unit);
+            case "m" -> value * 60L * 1000; // minutes
+            case "h" -> value * 60L * 60L * 1000; // hours
+            case "d" -> value * 24L * 60L * 60L * 1000; // days
+            case "M" -> value * 30L * 24L * 60L * 60L * 1000; // months (30 days)
+            default -> throw new IllegalArgumentException("Invalid period unit: " + unit);
         };
     }
-
+    
     private long[] calculateIntervalAndPoints(String period) {
-        return switch (period.charAt(period.length() - 1)) {
-            case 'm' -> new long[]{60L * 1000L, Integer.parseInt(period.substring(0, period.length() - 1)) + 1};
-            case 'h' -> new long[]{60L * 60L * 1000L, Integer.parseInt(period.substring(0, period.length() - 1)) + 1};
-            case 'd' -> new long[]{24L * 60L * 60L * 1000L, Integer.parseInt(period.substring(0, period.length() - 1)) + 1};
-            case 'w' -> new long[]{7L * 24L * 60L * 60L * 1000L, Integer.parseInt(period.substring(0, period.length() - 1)) + 1};
-            case 'M' -> new long[]{30L * 24L * 60L * 60L * 1000L, Integer.parseInt(period.substring(0, period.length() - 1)) + 1};
-            default -> throw new IllegalArgumentException("Invalid period format: " + period);
+        String unit = period.substring(period.length() - 1);
+        int value = Integer.parseInt(period.substring(0, period.length() - 1));
+        
+        return switch (unit) {
+            case "h", "H" -> {
+                // Для часов: интервал 1 час, количество точек = значение периода
+                yield new long[] { 3600000, value };
+            }
+            case "d", "D" -> {
+                // Для дней: интервал 1 день, количество точек = значение периода
+                yield new long[] { 86400000, value };
+            }
+            case "M" -> {
+                // Для месяцев: интервал 1 день, количество точек = количество дней в месяце
+                yield new long[] { 86400000, value * 30 };
+            }
+            default -> throw new IllegalArgumentException("Invalid period unit. Use h/H (hours), d/D (days) or M (months)");
         };
     }
 } 

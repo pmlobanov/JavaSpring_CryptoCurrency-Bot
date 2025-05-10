@@ -1,23 +1,23 @@
 package spbstu.mcs.telegramBot.DB.services;
 
-import com.mongodb.client.result.UpdateResult;
-import org.bson.Document;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.aggregation.Aggregation;
-import org.springframework.data.mongodb.core.query.Criteria;
-import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import spbstu.mcs.telegramBot.DB.collections.Notification;
-import org.springframework.data.mongodb.core.query.Update;
-import spbstu.mcs.telegramBot.DB.collections.Portfolio;
-import spbstu.mcs.telegramBot.DB.collections.TrackedCryptoCurrency;
-import spbstu.mcs.telegramBot.DB.currencies.CryptoCurrency;
 import spbstu.mcs.telegramBot.DB.repositories.NotificationRepository;
+import spbstu.mcs.telegramBot.cryptoApi.PriceFetcher;
+import spbstu.mcs.telegramBot.model.Currency;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import spbstu.mcs.telegramBot.DB.collections.User;
+import spbstu.mcs.telegramBot.DB.repositories.UserRepository;
 
-import java.util.List;
+import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.NoSuchElementException;
-
+import java.util.Optional;
 
 /**
  * Сервис для работы с уведомлениями пользователей.
@@ -33,161 +33,138 @@ import java.util.NoSuchElementException;
  */
 @Service
 public class NotificationService {
-    @Autowired
-    private NotificationRepository notificationRepository;
-    @Autowired
-    private UserService userService;
-    @Autowired
-    private MongoTemplate mongoTemplate;
+    private final NotificationRepository notificationRepository;
+    private final MongoTemplate mongoTemplate;
+    private final PriceFetcher priceFetcher;
+    private final UserRepository userRepository;
+    private static final Logger log = LoggerFactory.getLogger(NotificationService.class);
 
-
-    /**
-     * Создает уведомление о достижении порогового значения.
-     *
-     * @param userId идентификатор пользователя
-     * @param currency криптовалюта для отслеживания
-     * @param thresholdValue пороговое значение
-     * @return созданное уведомление
-     * @throws org.springframework.dao.DataAccessException при ошибках работы с БД
-     */
-    public Notification createValueAlert(String userId,
-                                         CryptoCurrency currency,
-                                         Double thresholdValue) {
-        Notification notification = Notification.createValueThreshold(
-                currency,
-                thresholdValue
-        );
-        Notification savedNotification = notificationRepository.save(notification);
-        userService.addNotificationToUser(userId, savedNotification.getId());
-        return savedNotification;
+    @Autowired
+    public NotificationService(NotificationRepository notificationRepository, 
+                             MongoTemplate mongoTemplate,
+                             PriceFetcher priceFetcher,
+                             UserRepository userRepository) {
+        this.notificationRepository = notificationRepository;
+        this.mongoTemplate = mongoTemplate;
+        this.priceFetcher = priceFetcher;
+        this.userRepository = userRepository;
     }
 
+    public Flux<Notification> getActiveAlerts(String chatId) {
+        return Flux.fromIterable(notificationRepository.findByChatIdAndIsActiveTrue(chatId));
+    }
 
-    /**
-     * Проверяет и активирует уведомления для портфеля.
-     * Выполняет сложную агрегацию для определения сработавших уведомлений.
-     *
-     * @param portfolioId идентификатор портфеля
-     * @throws org.springframework.dao.DataAccessException при ошибках агрегации
-     */
-    public void checkAndTriggerAlerts(String portfolioId) {
-        // 1. Cобираем данные для обновления
-        Aggregation aggregation = Aggregation.newAggregation(
-                //получили все методы по id
-                Aggregation.match(Criteria.where("_id").is(portfolioId)),
-                // рзвернули в элементы, где у каждого один элемент listOfCurrencies т.е одна валюта
-                Aggregation.unwind("listOfCurrencies"),
-                // аналог left join в SQL. Приписываем notifications к тем классам, где отслеживаемая валюта равна валюте в notifications.
-                // итого получаем, для каждой валюты - свой список уведомлений
-                Aggregation.lookup("notifications", "listOfCurrencies.trackedCrypto.cryptoCurrency", "cryptoCurrency", "notifications"),
-                // развернули, чтобы для каждого класса было только одно уведомление  - так легче проходиться по списку
-                // то есть в итоге получаем список пар валюта-уведомление.
-                Aggregation.unwind("notifications"),
-                // ну ти теперь смотрим, что если значения в отслеживаемой валюте - больше превышает наш порог - сетим уведомление в актив.
-                Aggregation.project()
-                        .and("listOfCurrencies.trackedCrypto.lastSeenValue").as("currentValue")
-                        .and("listOfCurrencies.initialPrice").as("initialPrice")
-                        .and("notifications").as("notification")
-                        .andExpression("""
-                (notifications.thresholdType == 'VALUE' && currentValue >= notifications.valueThreshold) ||
-                (notifications.thresholdType == 'PERCENT' && 
-                 ((currentValue - initialPrice)/initialPrice*100 >= notifications.percentThreshold))
-                """).as("shouldTrigger"),
-                Aggregation.match(Criteria.where("shouldTrigger").is(true))
-        );
+    public Flux<Notification> getActiveAlerts(Currency.Crypto cryptoCurrency) {
+        return Flux.fromIterable(notificationRepository.findByCryptoCurrencyAndIsActiveTrue(cryptoCurrency));
+    }
 
-        // 2. Выполнение агрегации
-        List<Document> results = mongoTemplate.aggregate(aggregation, "portfolios", Document.class)
-                .getMappedResults();
-
-        // 3. Активация уведомлений
-        results.forEach(doc -> {
-            Notification notification = mongoTemplate.getConverter().read(
-                    Notification.class,
-                    doc.get("notification", Document.class)
+    public Flux<Notification> getAllActiveAlerts() {
+        return Flux.fromIterable(notificationRepository.findAll())
+            .filter(notification -> 
+                notification.getThresholdType() == Notification.ThresholdType.EMA || 
+                Boolean.TRUE.equals(notification.isActive())
             );
-            triggerNotification(notification);
+    }
+
+    public Flux<Notification> getAllActiveAlerts(String chatId) {
+        return Flux.fromIterable(notificationRepository.findByChatIdAndIsActiveTrue(chatId));
+    }
+
+    public Flux<Notification> getAllUserAlerts(String chatId) {
+        return Flux.fromIterable(notificationRepository.findByChatId(chatId));
+    }
+
+    public Mono<Notification> save(Notification notification) {
+        log.info("Saving notification: {}", notification);
+        Notification saved = notificationRepository.save(notification);
+        log.info("Saved notification: {}", saved);
+        return Mono.just(saved);
+    }
+
+    public Mono<Void> delete(Notification notification) {
+        return Mono.fromRunnable(() -> notificationRepository.delete(notification));
+    }
+
+    public Mono<Void> deleteAll() {
+        return Mono.fromRunnable(() -> notificationRepository.deleteAll());
+    }
+
+    public Mono<Void> deleteAllAlerts() {
+        return deleteAll();
+    }
+
+    public Mono<Void> deleteAllAlerts(String chatId) {
+        return Mono.fromRunnable(() -> notificationRepository.deleteByChatId(chatId));
+    }
+
+    public Mono<Notification> getNotification(String id) {
+        return Mono.justOrEmpty(notificationRepository.findById(id))
+            .switchIfEmpty(Mono.error(new NoSuchElementException("Notification not found with id: " + id)));
+    }
+
+    public Mono<Boolean> checkAlert(Notification notification) {
+        Currency.Crypto crypto = notification.getCryptoCurrency();
+        return priceFetcher.getCurrentPrice(crypto)
+                .map(priceJson -> {
+                    try {
+                        BigDecimal currentPrice = new BigDecimal(priceJson);
+                        Double threshold = notification.getActiveThreshold();
+                        
+                        switch (notification.getThresholdType()) {
+                            case VALUE:
+                                return currentPrice.compareTo(BigDecimal.valueOf(threshold)) > 0;
+                            case PERCENT:
+                                BigDecimal percentageChange = BigDecimal.valueOf(threshold);
+                                BigDecimal currentPercentage = currentPrice
+                                    .multiply(new BigDecimal("100"))
+                                    .divide(BigDecimal.valueOf(threshold), 4, BigDecimal.ROUND_HALF_UP);
+                                return currentPercentage.compareTo(percentageChange) > 0;
+                            case EMA:
+                                return currentPrice.compareTo(BigDecimal.valueOf(threshold)) > 0;
+                            default:
+                                return false;
+                        }
+                    } catch (Exception e) {
+                        return false;
+                    }
+                });
+    }
+
+    public Mono<Boolean> checkAlert(Notification notification, BigDecimal currentPrice, BigDecimal startPrice) {
+        return Mono.just(notification)
+            .map(n -> {
+                Double threshold = n.getActiveThreshold();
+                switch (n.getThresholdType()) {
+                    case VALUE:
+                        return currentPrice.compareTo(BigDecimal.valueOf(threshold)) > 0;
+                    case PERCENT:
+                        if (startPrice != null) {
+                            BigDecimal percentageChange = BigDecimal.valueOf(threshold);
+                            BigDecimal currentPercentage = currentPrice.subtract(startPrice)
+                                .divide(startPrice, 4, BigDecimal.ROUND_HALF_UP)
+                                .multiply(new BigDecimal("100"));
+                            return currentPercentage.compareTo(percentageChange) > 0;
+                        }
+                        return false;
+                    case EMA:
+                        return currentPrice.compareTo(BigDecimal.valueOf(threshold)) > 0;
+                    default:
+                        return false;
+                }
+            });
+    }
+
+    public Mono<Void> addNotificationToUser(String chatId, String notificationId) {
+        return Mono.fromRunnable(() -> {
+            Optional<User> userOpt = userRepository.findOptionalByChatId(chatId);
+            User user = userOpt.orElseThrow(() -> new NoSuchElementException("User not found"));
+            
+            if (user.getNotificationIds() == null) {
+                user.setNotificationIds(new ArrayList<>());
+            }
+            
+            user.getNotificationIds().add(notificationId);
+            userRepository.save(user);
         });
     }
-
-    /**
-     * Активирует уведомление и сохраняет его в БД.
-     *
-     * @param notification уведомление для активации
-     * @throws IllegalArgumentException если notification == null
-     */
-    private void triggerNotification(Notification notification) {
-
-        notification.setIsActive(true);
-        mongoTemplate.save(notification);
-    }
-
-
-    /**
-     * Проверяет условия срабатывания уведомления.
-     *
-     * @param notification уведомление для проверки
-     * @param currentValue текущее значение
-     * @param initialValue начальное значение
-     * @return true если условия срабатывания выполнены
-     */
-    private boolean shouldTrigger(Notification notification,
-                                  Double currentValue,
-                                  Double initialValue) {
-        switch (notification.getThresholdType()) {
-            case VALUE:
-                return currentValue >= notification.getActiveThreshold();
-            case PERCENT:
-                Double changePercent = ((currentValue - initialValue) / initialValue) * 100;
-                return changePercent >= notification.getActiveThreshold();
-            case EMA:
-                // Логика для EMA Тоже пока ждем от Максима, то, как он будет выдавать мне значения.
-                return false;
-            default:
-                return false;
-        }
-    }
-
-    /**
-     * Удаляет уведомление по идентификатору.
-     *
-     * @param notificationId идентификатор уведомления
-     * @throws NoSuchElementException если уведомление не найдено
-     */
-    public void deleteNotification(String notificationId){
-        notificationRepository.deleteById(notificationId);
-    }
-
-    /**
-     * Деактивирует уведомление.
-     *
-     * @param notificationId идентификатор уведомления
-     * @throws NoSuchElementException если уведомление не найдено
-     * @throws org.springframework.dao.DataAccessException при ошибках обновления
-     */
-    public void deactivateNotification(String notificationId){
-        Query query = Query.query(Criteria.where("_id").is(notificationId));
-
-        Update update = new Update().set("isActive", false);
-        UpdateResult result = mongoTemplate.updateFirst(query, update, Notification.class);
-
-        if (result.getModifiedCount() == 0) {
-            throw new NoSuchElementException("Notification not found with id: " + notificationId);
-        }
-
-    }
-
-
-    /**
-     * Возвращает уведомление по идентификатору.
-     *
-     * @param notificationId идентификатор уведомления
-     * @return найденное уведомление
-     * @throws NoSuchElementException если уведомление не найдено
-     */
-    public Notification getNotification(String notificationId){
-        return notificationRepository.findById(notificationId).orElseThrow(
-                () -> new NoSuchElementException("Notification not found with id: " + notificationId));
-    }
-
 }

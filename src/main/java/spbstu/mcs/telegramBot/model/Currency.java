@@ -1,4 +1,4 @@
-package spbstu.mcs.telegramBot.cryptoApi.model;
+package spbstu.mcs.telegramBot.model;
 /**
  * Перечисления для криптовалют и фиатных валют
  */
@@ -38,26 +38,31 @@ public class Currency {
      * Криптовалюты
      */
     public enum Crypto {
-        BTC("BTC"),
-        ETH("ETH"),
-        SOL("SOL"),
-        MATIC("MATIC"),
-        XRP("XRP"),
-        ADA("ADA"),
-        DOGE("DOGE"),
-        AVAX("AVAX"),
-        NEAR("NEAR"),
-        LTS("LTS");
+        BTC("BTC", "Биткоин"),
+        ETH("ETH", "Эфириум"),
+        SOL("SOL", "Солана"),
+        XRP("XRP", "Рипл"),
+        ADA("ADA", "Кардано"),
+        DOGE("DOGE", "Догикоин"),
+        AVAX("AVAX", "Аваланч"),
+        NEAR("NEAR", "Нир"),
+        LTC("LTC", "Лайткоин");
         
         private final String code;
+        private final String name;
         private static Crypto currentCrypto = BTC;
         
-        Crypto(String code) {
+        Crypto(String code, String name) {
             this.code = code;
+            this.name = name;
         }
         
         public String getCode() {
             return code;
+        }
+
+        public String getName() {
+            return name;
         }
         
         public static Crypto getCurrentCrypto() {

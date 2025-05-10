@@ -1,6 +1,6 @@
 telegram:
   bot:
-    token: "7577873660:AAHbgfDR6DU9KC50gb6vD2j3qhLTdc6rG5M"
+    token: "TOKEN"
     username: "Crypto_Currency_BitX_bot"
 
 kafka:
@@ -11,3 +11,7 @@ kafka:
   topics:
     incoming: "telegram-incoming-messages"
     outgoing: "telegram-outgoing-messages"
+
+mongodb:
+  connection-string: "mongodb://appuser:apppassword@localhost:27017/BitBotDB?authSource=BitBotDB"
+  database: "BitBotDB"

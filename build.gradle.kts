@@ -2,7 +2,6 @@ plugins {
     java
     application
     id("com.github.johnrengelman.shadow") version "8.1.1" // Плагин для fat-JAR
-
 }
 
 group = "spbstu.mcs.telegramBot"
@@ -20,20 +19,14 @@ dependencies {
     // Kafka
     implementation("org.apache.kafka:kafka-clients:3.7.0")
     implementation("org.springframework.kafka:spring-kafka:3.1.3")
-    implementation("org.springframework.kafka:spring-kafka:3.1.3") // Включает kafka-clients
-    implementation("org.springframework:spring-context:6.1.5")     // Для DI
-    implementation("org.springframework:spring-messaging:6.1.5")   // Для Message<
 
+    // Spring Framework (minimal required)
     implementation("org.springframework:spring-web:6.1.3")
     implementation("org.springframework:spring-context:6.1.3")
     implementation("org.springframework:spring-webflux:6.1.3")
-    implementation("org.springframework:spring-tx:6.1.3")
-    implementation("org.springframework:spring-aop:6.1.3")
-    implementation("org.springframework.security:spring-security-core:6.1.3")
 
-    // Spring Data MongoDB (актуальная версия)
+    // Spring Data MongoDB
     implementation("org.springframework.data:spring-data-mongodb:4.2.0")
-    // MongoDB Java Driver (совместимый с Spring Data 4.x)
     implementation("org.mongodb:mongodb-driver-sync:4.11.1")
 
     // Configuration
@@ -48,12 +41,11 @@ dependencies {
     annotationProcessor("org.projectlombok:lombok:1.18.30")
 
     // Logging
-    implementation("ch.qos.logback:logback-classic:1.4.14")
     implementation("org.slf4j:slf4j-api:2.0.9")
+    implementation("org.slf4j:slf4j-simple:2.0.9")
 
     // Testing
     testImplementation("org.springframework:spring-test:6.1.3")
-
     testImplementation("io.projectreactor:reactor-test:3.6.3")
     testImplementation("org.junit.jupiter:junit-jupiter-api:5.10.1")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.10.1")

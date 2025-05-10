@@ -33,7 +33,7 @@ import java.util.List;
  *   <li>Сокращение количества обращений к БД при комплексных запросах</li>
  * </ul>
  *
- * @param userId уникальный идентификатор пользователя
+ * @param chatId уникальный идентификатор пользователя
  * @param notifications список уведомлений пользователя (может быть пустым, но не null)
  * @param portfolios список портфелей пользователя (может быть пустым, но не null)
  *
@@ -42,7 +42,7 @@ import java.util.List;
  * @see UserRepository
  */
 public record UserPortfolioView(
-        String userId,
+        String chatId,
         List<Notification> notifications,
         List<Portfolio> portfolios
 ) {

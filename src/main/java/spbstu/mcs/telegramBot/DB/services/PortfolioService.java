@@ -1,24 +1,27 @@
 package spbstu.mcs.telegramBot.DB.services;
 
-import com.mongodb.client.result.UpdateResult;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.BasicQuery;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 import spbstu.mcs.telegramBot.DB.collections.Portfolio;
-import spbstu.mcs.telegramBot.DB.collections.TrackedCryptoCurrency;
-import spbstu.mcs.telegramBot.DB.currencies.CryptoCurrency;
 import spbstu.mcs.telegramBot.DB.repositories.PortfolioRepository;
+import spbstu.mcs.telegramBot.DB.repositories.UserRepository;
+import spbstu.mcs.telegramBot.model.Currency;
+import spbstu.mcs.telegramBot.DB.collections.User;
+import spbstu.mcs.telegramBot.cryptoApi.CurrencyConverter;
+import spbstu.mcs.telegramBot.cryptoApi.PriceFetcher;
+import spbstu.mcs.telegramBot.DB.services.UserService;
+import reactor.core.publisher.Mono;
 
 import java.math.BigDecimal;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
-import java.util.Objects;
-import java.util.stream.Collectors;
+import java.util.Optional;
 
 /**
  * Сервис для управления портфелями криптовалют.
@@ -34,189 +37,62 @@ import java.util.stream.Collectors;
  */
 @Service
 public class PortfolioService {
-    @Autowired
-    private PortfolioRepository portfolioRepository;
-    @Autowired
-    private TrackedCryptoService cryptoService;
-    @Autowired
-    private UserService userService;
+    private final PortfolioRepository portfolioRepository;
+    private final UserRepository userRepository;
+    private final UserService userService;
+    private final PriceFetcher priceFetcher;
+    private final CurrencyConverter currencyConverter;
+    private final ObjectMapper objectMapper;
+
     @Autowired
     private MongoTemplate mongoTemplate;
+
+    @Autowired
+    public PortfolioService(PortfolioRepository portfolioRepository, 
+                          UserRepository userRepository,
+                          UserService userService,
+                          PriceFetcher priceFetcher,
+                          CurrencyConverter currencyConverter,
+                          ObjectMapper objectMapper) {
+        this.portfolioRepository = portfolioRepository;
+        this.userRepository = userRepository;
+        this.userService = userService;
+        this.priceFetcher = priceFetcher;
+        this.currencyConverter = currencyConverter;
+        this.objectMapper = objectMapper;
+    }
 
     /**
      * Создает новый портфель и связывает его с пользователем.
      *
-     * @param name название портфеля
-     * @param userId идентификатор пользователя
+     * @param userTgName имя пользователя в Telegram
+     * @param fiatCurrency валюта портфеля
+     * @param chatId идентификатор чата пользователя
      * @return созданный портфель
      * @throws org.springframework.dao.DataAccessException при ошибках сохранения
      */
-    //TODO возможно лучше смотреть по UserTgName
-    public Portfolio createPortfolio(String name, String userId) {
-        Portfolio portfolio = new Portfolio(name);
-        Portfolio savedPortfolio = portfolioRepository.save(portfolio);
-
-        // Обновляем список портфелей у пользователя
-        userService.addPortfolioToUser(userId, savedPortfolio.getId());
-        return savedPortfolio;
+    public Portfolio createPortfolio(String userTgName, Currency.Fiat fiatCurrency, String chatId) {
+        User user = userService.findByChatId(chatId);
+        if (user == null) {
+            throw new RuntimeException("User not found");
+        }
+        Portfolio portfolio = new Portfolio(fiatCurrency, chatId);
+        return portfolioRepository.save(portfolio);
     }
 
     /**
-     * Добавляет криптовалюту в портфель.
-     *
-     * @param portfolioId идентификатор портфеля
-     * @param cryptoId идентификатор криптовалюты
-     * @param amount количество для добавления
-     * @return обновленный портфель
-     * @throws NoSuchElementException если портфель или криптовалюта не найдены
-     * @throws IllegalArgumentException если валюта уже существует в портфеле
-     */
-    public Portfolio addCurrencyToPortfolio(String portfolioId, String cryptoId, Double amount) {
-        // Проверка входных параметров
-        if (portfolioId == null || portfolioId.isEmpty()) {
-            throw new IllegalArgumentException("Portfolio ID cannot be null or empty");
-        }
-        if (cryptoId == null || cryptoId.isEmpty()) {
-            throw new IllegalArgumentException("Crypto ID cannot be null or empty");
-        }
-        if (amount == null || amount <= 0) {
-            throw new IllegalArgumentException("Amount must be positive");
-        }
-
-        // Получаем криптовалюту и портфель
-        TrackedCryptoCurrency crypto = cryptoService.getCurrencyById(cryptoId);
-        Portfolio portfolio = getPortfolio(portfolioId);
-
-        // Инициализируем список, если он null
-        if (portfolio.getListOfCurrencies() == null) {
-            portfolio.setListOfCurrencies(new ArrayList<>());
-        }
-
-        // Проверка на существование валюты в портфеле с null-безопасностью
-        boolean currencyExists = portfolio.getListOfCurrencies().stream()
-                .filter(Objects::nonNull) // Фильтруем null-элементы
-                .anyMatch(h -> h.getTrackedCrypto() != null
-                        && cryptoId.equals(h.getTrackedCrypto().getId()));
-
-        if (currencyExists) {
-            throw new IllegalArgumentException("Currency already exists in portfolio");
-        }
-
-        // Создаем новую запись
-        Portfolio.CryptoHolding holding = new Portfolio.CryptoHolding(
-                crypto,
-                amount
-        );
-
-        try {
-            // Атомарное обновление в MongoDB
-            Query query = Query.query(Criteria.where("_id").is(portfolioId));
-            Update update = new Update().push("listOfCurrencies", holding);
-            UpdateResult result = mongoTemplate.updateFirst(query, update, Portfolio.class);
-
-            if (result.getModifiedCount() == 0) {
-                throw new IllegalStateException("Failed to update portfolio");
-            }
-
-            return getPortfolio(portfolioId);
-        } catch (Exception e) {
-            throw new RuntimeException("Error adding currency to portfolio", e);
-        }
-    }
-
-    /**
-     * Рассчитывает текущую стоимость портфеля.
-     *
-     * @param portfolioId идентификатор портфеля
-     * @return общая стоимость портфеля в BigDecimal
-     * @throws NoSuchElementException если портфель не найден
-     * @throws ClassNotFoundException если возникла проблема с расчетом
-     */
-    public BigDecimal calculatePortfolioValue(String portfolioId) throws ClassNotFoundException {
-        Portfolio portfolio = getPortfolio(portfolioId);
-        return portfolio.getListOfCurrencies().stream()
-                .map(holding ->  BigDecimal.valueOf(holding.getAmount()).multiply(BigDecimal.valueOf(
-                            holding.getTrackedCrypto().getLastSeenValue()
-                    )))
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-    }
-
-    /**
-     * Возвращает портфель по идентификатору.
+     * Получает портфель по идентификатору.
      *
      * @param portfolioId идентификатор портфеля
      * @return найденный портфель
      * @throws NoSuchElementException если портфель не найден
      */
-    public Portfolio getPortfolio(String portfolioId){
-        return portfolioRepository.findById(portfolioId).orElseThrow(
-                () -> new NoSuchElementException("Portfolio not found with id: " + portfolioId));
-    }
-
-    /**
-     * Обновляет количество указанной криптовалюты в портфеле
-     *
-     * @param portfolioId ID портфеля
-     * @param currencyToUpdate Валюта для обновления
-     * @param newAmount Новое количество (должно быть положительным)
-     * @throws NoSuchElementException если портфель не найден
-     * @throws IllegalArgumentException если newAmount <= 0 или валюта не найдена
-     */
-    public void updateCurrencyAmount(String portfolioId,
-                                     CryptoCurrency currencyToUpdate,
-                                     BigDecimal newAmount) {
-        // 1. Валидация входных параметров
-        if (newAmount.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new IllegalArgumentException("Amount must be positive");
+    public Portfolio getPortfolio(String portfolioId) {
+        Optional<Portfolio> portfolio = portfolioRepository.findById(portfolioId);
+        if (portfolio.isEmpty()) {
+            throw new RuntimeException("Portfolio not found");
         }
-
-        Query query = Query.query(
-                Criteria.where("_id").is(portfolioId)
-                        .and("listOfCurrencies.trackedCrypto.cryptoCurrency").is(currencyToUpdate)
-        );
-
-        Update update = new Update()
-                .set("listOfCurrencies.$.amount", newAmount.doubleValue());
-
-        UpdateResult result = mongoTemplate.updateFirst(query, update, Portfolio.class);
-
-        if (result.getModifiedCount() == 0) {
-            throw new IllegalArgumentException("Currency " + currencyToUpdate + " not found in portfolio");
-        }
-    }
-
-    /**
-     * Удаляет криптовалюту из портфеля.
-     *
-     * @param portfolioId ID портфеля
-     * @param currencyToDelete валюта для удаления
-     * @throws NoSuchElementException если портфель не найден
-     * @throws IllegalArgumentException если валюта не найдена в портфеле
-     */
-    public void deleteHoldingFromPortfolio(String portfolioId, CryptoCurrency currencyToDelete) {
-        // 1. Создаем запрос для поиска портфеля и удаления элемента из массива
-        Query query = Query.query(
-                Criteria.where("_id").is(portfolioId)
-                        .and("listOfCurrencies.trackedCrypto.cryptoCurrency").is(currencyToDelete)
-        );
-
-        // 2. Обновление с использованием оператора $pull
-        Update update = new Update().pull("listOfCurrencies",
-                new BasicQuery(
-                        Criteria.where("trackedCrypto.cryptoCurrency").is(currencyToDelete).getCriteriaObject()
-                )
-        );
-
-        // 3. Выполняем операцию и проверяем результат
-        UpdateResult result = mongoTemplate.updateFirst(query, update, Portfolio.class);
-
-        // 4. Проверяем, был ли фактически удален элемент
-        if (result.getModifiedCount() == 0) {
-            throw new IllegalArgumentException(
-                    "Currency " + currencyToDelete + " not found in portfolio " + portfolioId);
-        }
-
-        //TODO логирование
+        return portfolio.get();
     }
 
     /**
@@ -226,10 +102,9 @@ public class PortfolioService {
      * @return найденный портфель
      * @throws NoSuchElementException если портфель не найден
      */
-    public Portfolio getPortfolioId(String portfolioName){
+    public Portfolio getPortfolioId(String portfolioName) {
         return portfolioRepository.findByName(portfolioName);
     }
-
 
     /**
      * Удаляет портфель.
@@ -238,9 +113,152 @@ public class PortfolioService {
      * @throws NoSuchElementException если портфель не найден
      */
     public void deletePortfolio(String portfolioId) {
-        if (!portfolioRepository.existsById(portfolioId)) {
-            throw new NoSuchElementException("Portfolio not found with id: " + portfolioId);
+        Portfolio portfolio = getPortfolio(portfolioId);
+        portfolioRepository.delete(portfolio);
+    }
+
+    public List<Portfolio> getUserPortfolios(String userTgName) {
+        User user = userRepository.findByUserTgName(userTgName);
+        if (user == null) {
+            throw new RuntimeException("User not found");
         }
-        portfolioRepository.deleteById(portfolioId);
+        return portfolioRepository.findAllById(user.getPortfolioIds());
+    }
+
+    public List<Portfolio> getPortfoliosByFiatCurrency(Currency.Fiat fiatCurrency) {
+        return portfolioRepository.findByFiatCurrency(fiatCurrency);
+    }
+
+    public Portfolio addCryptoToPortfolio(String portfolioId, Currency.Crypto crypto, BigDecimal amount) {
+        Portfolio portfolio = portfolioRepository.findById(portfolioId)
+            .orElseThrow(() -> new RuntimeException("Portfolio not found"));
+
+        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("Amount must be positive");
+        }
+
+        if (portfolio.getCryptoCurrency() == null || portfolio.getCryptoCurrency() == crypto) {
+            portfolio.setCryptoCurrency(crypto);
+            portfolio.setCount(portfolio.getCount() == null ? amount : portfolio.getCount().add(amount));
+        } else {
+            throw new IllegalArgumentException("Portfolio already contains a different cryptocurrency");
+        }
+
+        return portfolioRepository.save(portfolio);
+    }
+
+    public Portfolio removeCryptoFromPortfolio(String portfolioId, Currency.Crypto crypto, BigDecimal amount) {
+        Portfolio portfolio = portfolioRepository.findById(portfolioId)
+            .orElseThrow(() -> new RuntimeException("Portfolio not found"));
+
+        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("Amount must be positive");
+        }
+
+        if (portfolio.getCryptoCurrency() != crypto) {
+            throw new IllegalArgumentException("Portfolio does not contain this cryptocurrency");
+        }
+
+        BigDecimal currentAmount = portfolio.getCount();
+        if (currentAmount.compareTo(amount) < 0) {
+            throw new IllegalArgumentException("Insufficient amount");
+        }
+
+        portfolio.setCount(currentAmount.subtract(amount));
+        if (portfolio.getCount().compareTo(BigDecimal.ZERO) == 0) {
+            portfolio.setCryptoCurrency(null);
+        }
+
+        return portfolioRepository.save(portfolio);
+    }
+
+    /**
+     * Сохраняет портфель в базу данных.
+     *
+     * @param portfolio портфель для сохранения
+     * @return сохраненный портфель
+     * @throws org.springframework.dao.DataAccessException при ошибках сохранения
+     */
+    public Portfolio savePortfolio(Portfolio portfolio) {
+        if (portfolio == null) {
+            throw new IllegalArgumentException("Portfolio cannot be null");
+        }
+        return portfolioRepository.save(portfolio);
+    }
+
+    /**
+     * Получает все портфели пользователя по идентификатору чата.
+     *
+     * @param chatId идентификатор чата пользователя
+     * @return список портфелей пользователя
+     * @throws org.springframework.dao.DataAccessException при ошибках доступа к данным
+     */
+    public List<Portfolio> getPortfoliosByChatId(String chatId) {
+        return portfolioRepository.findByChatId(chatId);
+    }
+
+    public Mono<String> getPortfolioInfo(String portfolioId) {
+        return Mono.fromCallable(() -> {
+            Portfolio portfolio = portfolioRepository.findById(portfolioId)
+                .orElseThrow(() -> new RuntimeException("Portfolio not found"));
+
+            StringBuilder response = new StringBuilder();
+            response.append("📊 Информация о портфеле\n\n");
+
+            if (portfolio.getCryptoCurrency() != null) {
+                response.append("Криптовалюта: ").append(portfolio.getCryptoCurrency().getCode()).append("\n");
+                response.append("Количество: ").append(portfolio.getCount()).append("\n");
+                
+                if (portfolio.getLastCryptoPrice() != null) {
+                    response.append("Последняя известная цена: ")
+                           .append(portfolio.getLastCryptoPrice())
+                           .append(" ")
+                           .append(portfolio.getFiatCurrency().getCode())
+                           .append("\n");
+                }
+            } else {
+                response.append("Портфель пуст\n");
+            }
+
+            return response.toString();
+        });
+    }
+
+    public Mono<String> getPortfolioValue(String portfolioId) {
+        return Mono.fromCallable(() -> {
+            Portfolio portfolio = portfolioRepository.findById(portfolioId)
+                .orElseThrow(() -> new RuntimeException("Portfolio not found"));
+
+            if (portfolio.getCryptoCurrency() == null) {
+                return Mono.just("Портфель пуст");
+            }
+
+            return priceFetcher.getCurrentPrice(portfolio.getCryptoCurrency())
+                .flatMap(priceJson -> {
+                    try {
+                        JsonNode node = objectMapper.readTree(priceJson);
+                        BigDecimal currentPrice = new BigDecimal(node.get("price").asText());
+                        BigDecimal totalValue = portfolio.getCount().multiply(currentPrice);
+                        
+                        portfolio.setLastCryptoPrice(currentPrice);
+                        portfolio.setLastCryptoPriceTimestamp(System.currentTimeMillis() / 1000);
+                        portfolioRepository.save(portfolio);
+
+                        return Mono.just(String.format("💰 Стоимость портфеля: %.2f %s", 
+                            totalValue, portfolio.getFiatCurrency().getCode()));
+                    } catch (Exception e) {
+                        return Mono.error(e);
+                    }
+                });
+        }).flatMap(mono -> mono);
+    }
+
+    public Portfolio save(Portfolio portfolio) {
+        return portfolioRepository.save(portfolio);
+    }
+
+    public Portfolio delete(Portfolio portfolio) {
+        portfolioRepository.delete(portfolio);
+        return portfolio;
     }
 }

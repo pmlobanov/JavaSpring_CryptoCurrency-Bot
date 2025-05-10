@@ -1,5 +1,6 @@
 package spbstu.mcs.telegramBot.DB.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import org.springframework.context.annotation.Bean;
@@ -7,6 +8,8 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.mongodb.config.AbstractMongoClientConfiguration;
 import org.springframework.data.mongodb.repository.config.EnableMongoRepositories;
+import spbstu.mcs.telegramBot.config.Config;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * Конфигурационный класс для подключения к MongoDB.
@@ -20,16 +23,26 @@ import org.springframework.data.mongodb.repository.config.EnableMongoRepositorie
  */
 @Configuration
 @EnableMongoRepositories(basePackages = "spbstu.mcs.telegramBot.DB.repositories")
-@ComponentScan("spbstu.mcs.telegramBot.DB") // Добавьте эту строку
+@ComponentScan({
+    "spbstu.mcs.telegramBot.DB", 
+    "spbstu.mcs.telegramBot.service",
+    "spbstu.mcs.telegramBot.cryptoApi"
+})
+@EnableScheduling
 public class MongoConfig extends AbstractMongoClientConfiguration {
+
+    @Bean
+    public ObjectMapper objectMapper() {
+        return new ObjectMapper();
+    }
 
     /**
      * Возвращает имя базы данных, которая будет использоваться по умолчанию.
-     * @return имя базы данных ("BitBotDB")
+     * @return имя базы данных из конфигурации
      */
     @Override
     public String getDatabaseName() {
-        return "BitBotDB";
+        return Config.getMongoDbName();
     }
 
     protected String getMappingBasePackage() {
@@ -39,14 +52,9 @@ public class MongoConfig extends AbstractMongoClientConfiguration {
 
     /**
      * Создает и настраивает клиентское подключение к MongoDB.
-     *
-     * <p>Подключение устанавливается к локальному MongoDB серверу:</p>
-     * <ul>
-     *   <li>Хост: localhost</li>
-     *   <li>Порт: 27017 (стандартный порт MongoDB)</li>
-     * </ul>
-     *
-     * <p>Пример URI подключения: "mongodb://localhost:27017"</p>
+     * 
+     * <p>Подключение устанавливается к MongoDB серверу на основе строки подключения
+     * из конфигурационного файла application.yml.</p>
      *
      * @return экземпляр {@link MongoClient} для работы с MongoDB
      * @see MongoClients#create(String)
@@ -54,8 +62,6 @@ public class MongoConfig extends AbstractMongoClientConfiguration {
     @Bean
     @Override
     public MongoClient mongoClient() {
-        // Для Docker используйте host.docker.internal вместо localhost
-        return MongoClients.create("mongodb://host.docker.internal:27017");}
-
-
+        return MongoClients.create(Config.getMongoConnectionString());
+    }
 }

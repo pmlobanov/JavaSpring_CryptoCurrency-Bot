@@ -38,6 +38,14 @@ public class Config {
     public static String getKafkaOutgoingTopic() {
         return getNestedValue("kafka", "topics", "outgoing");
     }
+    
+    public static String getMongoConnectionString() {
+        return getNestedValue("mongodb", "connection-string");
+    }
+    
+    public static String getMongoDbName() {
+        return getNestedValue("mongodb", "database");
+    }
 
     @SuppressWarnings("unchecked")
     private static String getNestedValue(String... keys) {

@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   zookeeper:
     image: zookeeper:3.8
@@ -15,31 +13,51 @@ services:
       - "9092:9092"
       - "29092:29092"
     environment:
+      # Явное указание режима с Zookeeper
       KAFKA_MODE: "zookeeper"
       KAFKA_CFG_ZOOKEEPER_CONNECT: "zookeeper:2181"
+
+      # Полная конфигурация слушателей
       KAFKA_CFG_LISTENERS: "PLAINTEXT://:9092,PLAINTEXT_HOST://:29092"
       KAFKA_CFG_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092"
       KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
       KAFKA_CFG_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+
+      # Разрешение незащищенных соединений для разработки
       ALLOW_PLAINTEXT_LISTENER: "yes"
+
+      # Автосоздание топиков
       KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
     depends_on:
       - zookeeper
 
   mongodb:
     image: mongo:5.0
+    container_name: mongodb
+    restart: always
     ports:
       - "27017:27017"
     environment:
-      MONGO_INITDB_ROOT_USERNAME: root
-      MONGO_INITDB_ROOT_PASSWORD: example
+      - MONGO_INITDB_ROOT_USERNAME=root
+      - MONGO_INITDB_ROOT_PASSWORD=example
+      - MONGO_INITDB_DATABASE=BitBotDB
     volumes:
+      - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
       - mongodb_data:/data/db
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 5s
-      timeout: 5s
+      test: mongo --eval 'db.runCommand("ping").ok' --quiet localhost:27017/admin --username root --password example || exit 1
+      interval: 10s
+      timeout: 10s
       retries: 5
+      start_period: 40s
+    command: ["--auth"]
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
 
 volumes:
   mongodb_data:
+    driver: local

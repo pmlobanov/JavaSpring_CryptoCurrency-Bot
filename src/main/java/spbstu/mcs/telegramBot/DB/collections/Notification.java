@@ -1,12 +1,15 @@
 package spbstu.mcs.telegramBot.DB.collections;
 
+import lombok.Data;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.PersistenceConstructor;
+import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
-import spbstu.mcs.telegramBot.DB.currencies.CryptoCurrency;
+import org.springframework.data.mongodb.core.mapping.Field;
+import spbstu.mcs.telegramBot.model.Currency;
+import java.beans.ConstructorProperties;
 
 import java.util.Objects;
-import java.util.stream.Stream;
 
 /**
  * Класс, представляющий уведомление о достижении порогового значения для криптовалюты.
@@ -21,22 +24,15 @@ import java.util.stream.Stream;
  *
  * <p>Пример создания уведомления:</p>
  * <pre>{@code
- * Notification alert = Notification.createValueThreshold(CryptoCurrency.BTC, 50000.0);
+ * Notification alert = Notification.createValueThreshold(Currency.Crypto.BTC, 50000.0);
  * }</pre>
  *
  * @see Document
- * @see CryptoCurrency
+ * @see Currency.Crypto
  */
+@Data
 @Document(collection = "notifications")
 public class Notification {
-    /**
-     * Возвращает уникальный идентификатор уведомления.
-     * @return строковый идентификатор
-     */
-    public String getId() {
-        return this.id;
-    }
-
     /**
      * Тип порогового значения для уведомления.
      */
@@ -51,103 +47,90 @@ public class Notification {
 
     @Id
     private String id;
-    private CryptoCurrency cryptoCurrency;
-    private Double valueThreshold;
-    private Double percentThreshold;
-    private Double emaValue;
+
+    @Field("cryptoCurrency")
+    private Currency.Crypto cryptoCurrency;
+
+    @Field("fiatCurrency")
+    private Currency.Fiat fiatCurrency;
+
+    @Field("thresholdType")
     private ThresholdType thresholdType;
+
+    @Field(value = "isActive", write = Field.Write.NON_NULL)
     private Boolean isActive;
 
-    /**
-     * Приватный конструктор для создания уведомления.
-     * @param cryptoCurrency криптовалюта для отслеживания
-     * @param value пороговое значение
-     * @param type тип порога
-     */
-    private Notification(CryptoCurrency cryptoCurrency,
-                         Double value,
-                         ThresholdType type) {
-        this.cryptoCurrency = cryptoCurrency;
-        this.thresholdType = type;
-        this.isActive = true;
+    @Field("chatId")
+    private String chatId;
 
-        switch (type) {
-            case VALUE:
-                this.valueThreshold = value;
-                break;
-            case PERCENT:
-                this.percentThreshold = value;
-                break;
-            case EMA:
-                this.emaValue = value;
-                break;
-        }
+    @Field("upperBoundary")
+    private Double upperBoundary;
+
+    @Field("lowerBoundary")
+    private Double lowerBoundary;
+
+    @Field("startPrice")
+    private Double startPrice;
+
+    @Field("startTimestamp")
+    private Long startTimestamp;
+
+    @Field("triggerTimestamp")
+    private Long triggerTimestamp;
+
+    // Для PERCENT алертов
+    @Field("upPercent")
+    private Double upPercent;
+
+    @Field("downPercent")
+    private Double downPercent;
+
+    // Для EMA алертов
+    @Field("startEMA")
+    private Double startEMA;
+
+    @Field("currentEMA")
+    private Double currentEMA;
+
+    /**
+     * Конструктор без параметров для Spring Data MongoDB
+     */
+    public Notification() {
     }
 
-    // Конструктор для Spring Data
-    @PersistenceConstructor
-    public Notification(String id, CryptoCurrency cryptoCurrency,
-                        Double valueThreshold, Double percentThreshold,
-                        Double emaValue, ThresholdType thresholdType,
-                        Boolean isActive) {
+    /**
+     * Конструктор для создания уведомления
+     */
+    public Notification(String id, Currency.Crypto cryptoCurrency, Currency.Fiat fiatCurrency, ThresholdType thresholdType, boolean isActive,
+                       String chatId, Double upperBoundary, Double lowerBoundary, Double startPrice) {
         this.id = id;
         this.cryptoCurrency = cryptoCurrency;
-        this.valueThreshold = valueThreshold;
-        this.percentThreshold = percentThreshold;
-        this.emaValue = emaValue;
+        this.fiatCurrency = fiatCurrency;
         this.thresholdType = thresholdType;
         this.isActive = isActive;
+        this.chatId = chatId;
+        this.upperBoundary = upperBoundary;
+        this.lowerBoundary = lowerBoundary;
+        this.startPrice = startPrice;
+        this.startTimestamp = System.currentTimeMillis() / 1000; // Unix timestamp в секундах
     }
 
     /**
-     * Создает уведомление с абсолютным пороговым значением.
-     * @param currency криптовалюта
-     * @param threshold пороговое значение
-     * @return новый экземпляр Notification
+     * Возвращает уникальный идентификатор уведомления.
+     * @return строковый идентификатор
      */
-    public static Notification createValueThreshold(CryptoCurrency currency, Double threshold) {
-        return new Notification(currency, threshold, ThresholdType.VALUE);
-    }
-    /**
-     * Создает уведомление с процентным изменением.
-     * @param currency криптовалюта
-     * @param percent процент изменения
-     * @return новый экземпляр Notification
-     */
-    public static Notification createPercentThreshold(CryptoCurrency currency, Double percent) {
-        return new Notification(currency, percent, ThresholdType.PERCENT);
-    }
-    /**
-     * Создает уведомление на основе EMA.
-     * @param currency криптовалюта
-     * @param emaValue значение EMA
-     * @return новый экземпляр Notification
-     */
-    public static Notification createEMAThreshold(CryptoCurrency currency, Double emaValue) {
-        return new Notification(currency, emaValue, ThresholdType.EMA);
+    public String getId() {
+        return id;
     }
 
     /**
      * Возвращает отслеживаемую криптовалюту.
      * @return криптовалюта
      */
-    public CryptoCurrency getCryptoCurrency() {
+    public Currency.Crypto getCryptoCurrency() {
         return cryptoCurrency;
     }
 
-    /**
-     * Возвращает активное пороговое значение в зависимости от типа уведомления.
-     * @return текущее пороговое значение
-     * @throws IllegalStateException если тип порога неизвестен
-     */
-    public Double getActiveThreshold() {
-        switch (thresholdType) {
-            case VALUE: return valueThreshold;
-            case PERCENT: return percentThreshold;
-            case EMA: return emaValue;
-            default: throw new IllegalStateException("Unknown threshold type");
-        }
-    }
     /**
      * Возвращает тип порогового значения.
      * @return тип порога
@@ -160,34 +143,20 @@ public class Notification {
      * Проверяет, активно ли уведомление.
      * @return true если уведомление активно
      */
-    public Boolean isActive() {
-        return isActive;
-    }
-
-    /**
-     * Деактивирует уведомление.
-     */
-    public void deactivate() {
-        this.isActive = false;
+    public boolean isActive() {
+        if (thresholdType == ThresholdType.EMA) {
+            return true;
+        }
+        return isActive != null && isActive;
     }
 
     /**
      * Устанавливает статус активности уведомления.
-     * @param marlOfActiveness флаг активности
+     * @param isActive флаг активности
      */
-    public void setIsActive(Boolean marlOfActiveness){
-        this.isActive = marlOfActiveness;
-    }
-
-    /**
-     * Проверяет валидность состояния уведомления.
-     * @throws IllegalStateException если задано некорректное количество порогов
-     */
-    public void validate() {
-        if (Stream.of(valueThreshold, percentThreshold, emaValue)
-                .filter(Objects::nonNull)
-                .count() != 1) {
-            throw new IllegalStateException("Должен быть задан ровно один порог");
+    public void setIsActive(boolean isActive) {
+        if (thresholdType != ThresholdType.EMA) {
+            this.isActive = isActive;
         }
     }
 
@@ -200,12 +169,56 @@ public class Notification {
         return "Notification{" +
                 "id='" + id + '\'' +
                 ", cryptoCurrency=" + cryptoCurrency +
-                ", valueThreshold=" + valueThreshold +
-                ", percentThreshold=" + percentThreshold +
-                ", emaValue=" + emaValue +
                 ", thresholdType=" + thresholdType +
                 ", isActive=" + isActive +
+                ", chatId='" + chatId + '\'' +
+                ", upperBoundary=" + upperBoundary +
+                ", lowerBoundary=" + lowerBoundary +
+                ", startPrice=" + startPrice +
                 '}';
     }
 
+    public String getChatId() {
+        return chatId;
+    }
+
+    public void setChatId(String chatId) {
+        this.chatId = chatId;
+    }
+
+    public Double getUpperBoundary() {
+        return upperBoundary;
+    }
+
+    public void setUpperBoundary(Double upperBoundary) {
+        this.upperBoundary = upperBoundary;
+    }
+
+    public Double getLowerBoundary() {
+        return lowerBoundary;
+    }
+
+    public void setLowerBoundary(Double lowerBoundary) {
+        this.lowerBoundary = lowerBoundary;
+    }
+
+    public Double getStartPrice() {
+        return startPrice;
+    }
+
+    public void setStartPrice(Double startPrice) {
+        this.startPrice = startPrice;
+    }
+
+    public Double getActiveThreshold() {
+        return upperBoundary;
+    }
+
+    public Currency.Fiat getFiatCurrency() {
+        return fiatCurrency;
+    }
+
+    public void setFiatCurrency(Currency.Fiat fiatCurrency) {
+        this.fiatCurrency = fiatCurrency;
+    }
 }

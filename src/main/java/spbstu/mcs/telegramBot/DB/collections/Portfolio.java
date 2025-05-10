@@ -1,11 +1,10 @@
 package spbstu.mcs.telegramBot.DB.collections;
 
 import org.springframework.data.annotation.Id;
-import org.springframework.data.mongodb.core.mapping.DBRef;
 import org.springframework.data.mongodb.core.mapping.Document;
+import spbstu.mcs.telegramBot.model.Currency;
 
-import java.time.Instant;
-import java.util.List;
+import java.math.BigDecimal;
 
 /**
  * Класс, представляющий портфель криптовалют.
@@ -14,161 +13,154 @@ import java.util.List;
  * <p>Каждый портфель содержит:</p>
  * <ul>
  *   <li>Название портфеля</li>
- *   <li>Список криптовалютных активов ({@link CryptoHolding})</li>
+ *   <li>Фиатную валюту портфеля</li>
+ *   <li>Список криптовалютных активов с их количествами</li>
  * </ul>
  *
  * <p>Пример использования:</p>
  * <pre>{@code
- * Portfolio portfolio = new Portfolio("Мой портфель");
- * portfolio.setListOfCurrencies(List.of(
- *     new CryptoHolding(trackedCrypto, 1.5, 50000.0)
- * ));
+ * Portfolio portfolio = new Portfolio("Мой портфель", Currency.Fiat.USD);
+ * portfolio.addCrypto(Currency.Crypto.BTC, new BigDecimal("1.5"));
  * }</pre>
  *
  * @see Document
- * @see DBRef
+ * @see Currency.Crypto
+ * @see Currency.Fiat
  */
 @Document(collection = "portfolios")
 public class Portfolio {
-
     @Id
     private String id;
     private String name;
-    private List<CryptoHolding> listOfCurrencies;
+    private Currency.Fiat fiatCurrency;
+    private Currency.Crypto cryptoCurrency;
+    private BigDecimal count;
+    private Long createdAt;
+    private String chatId;
+    
+    // Новые поля для отслеживания цен
+    private BigDecimal lastPortfolioPrice;
+    private Long lastPortfolioPriceTimestamp;
+    private BigDecimal lastCryptoPrice;
+    private Long lastCryptoPriceTimestamp;
 
     /**
-     * Возвращает уникальный идентификатор портфеля.
-     * @return строковый идентификатор
+     * No-args constructor required by Spring Data MongoDB
      */
+    public Portfolio() {
+        this.createdAt = System.currentTimeMillis() / 1000;
+    }
+
+    /**
+     * Создает новый портфель с указанной фиатной валютой.
+     *
+     * @param fiatCurrency фиатная валюта портфеля
+     * @param chatId идентификатор чата пользователя
+     */
+    public Portfolio(Currency.Fiat fiatCurrency, String chatId) {
+        this.fiatCurrency = fiatCurrency;
+        this.chatId = chatId;
+        this.createdAt = System.currentTimeMillis() / 1000;
+    }
+
     public String getId() {
         return id;
     }
 
-    /**
-     * Возвращает название портфеля.
-     * @return название портфеля
-     */
     public String getName() {
         return name;
     }
 
-    /**
-     * Устанавливает название портфеля.
-     * @param name новое название портфеля
-     */
     public void setName(String name) {
         this.name = name;
     }
 
-    /**
-     * Возвращает список криптовалютных активов.
-     * @return список объектов {@link CryptoHolding}
-     */
-    public List<CryptoHolding> getListOfCurrencies() {
-        return listOfCurrencies;
+    public Currency.Fiat getFiatCurrency() {
+        return fiatCurrency;
     }
 
-    /**
-     * Устанавливает список криптовалютных активов.
-     * @param listOfCurrencies новый список активов
-     */
-    public void setListOfCurrencies(List<CryptoHolding> listOfCurrencies) {
-        this.listOfCurrencies = listOfCurrencies;
+    public void setFiatCurrency(Currency.Fiat fiatCurrency) {
+        this.fiatCurrency = fiatCurrency;
     }
 
-    /**
-     * Возвращает строковое представление портфеля.
-     * @return строковое описание объекта
-     */
+    public Currency.Crypto getCryptoCurrency() {
+        return cryptoCurrency;
+    }
+
+    public void setCryptoCurrency(Currency.Crypto cryptoCurrency) {
+        this.cryptoCurrency = cryptoCurrency;
+    }
+
+    public BigDecimal getCount() {
+        return count;
+    }
+
+    public void setCount(BigDecimal count) {
+        this.count = count;
+    }
+
+    public Long getCreatedAt() {
+        return createdAt;
+    }
+
+    public BigDecimal getLastPortfolioPrice() {
+        return lastPortfolioPrice;
+    }
+
+    public void setLastPortfolioPrice(BigDecimal lastPortfolioPrice) {
+        this.lastPortfolioPrice = lastPortfolioPrice;
+    }
+
+    public Long getLastPortfolioPriceTimestamp() {
+        return lastPortfolioPriceTimestamp;
+    }
+
+    public void setLastPortfolioPriceTimestamp(Long lastPortfolioPriceTimestamp) {
+        this.lastPortfolioPriceTimestamp = lastPortfolioPriceTimestamp;
+    }
+
+    public BigDecimal getLastCryptoPrice() {
+        return lastCryptoPrice;
+    }
+
+    public void setLastCryptoPrice(BigDecimal lastCryptoPrice) {
+        this.lastCryptoPrice = lastCryptoPrice;
+    }
+
+    public Long getLastCryptoPriceTimestamp() {
+        return lastCryptoPriceTimestamp;
+    }
+
+    public void setLastCryptoPriceTimestamp(Long lastCryptoPriceTimestamp) {
+        this.lastCryptoPriceTimestamp = lastCryptoPriceTimestamp;
+    }
+
+    public void updateLastCryptoPrice(BigDecimal price, Long timestamp) {
+        this.lastCryptoPrice = price;
+        this.lastCryptoPriceTimestamp = timestamp;
+    }
+
+    public String getChatId() {
+        return chatId;
+    }
+
+    public void setChatId(String chatId) {
+        this.chatId = chatId;
+    }
+
     @Override
     public String toString() {
         return "Portfolio{" +
                 "id='" + id + '\'' +
                 ", name='" + name + '\'' +
-                ", listOfCurrencies=" + listOfCurrencies +
+                ", fiatCurrency=" + fiatCurrency +
+                ", cryptoCurrency=" + cryptoCurrency +
+                ", count=" + count +
+                ", createdAt=" + createdAt +
+                ", lastPortfolioPrice=" + lastPortfolioPrice +
+                ", lastPortfolioPriceTimestamp=" + lastPortfolioPriceTimestamp +
+                ", lastCryptoPrice=" + lastCryptoPrice +
+                ", lastCryptoPriceTimestamp=" + lastCryptoPriceTimestamp +
                 '}';
     }
-
-    /**
-     * Вложенный класс для хранения информации о криптовалютном активе.
-     * Использует ссылку ({@link DBRef}) на отслеживаемую криптовалюту.
-     */
-    public static class CryptoHolding {
-        @DBRef // Ссылка на TrackedCryptoCurrency
-        private TrackedCryptoCurrency trackedCrypto;
-        private Double amount;        // Количество валюты// Цена на момент добавления
-        private Instant addedAt;     // Время добавления
-        /**
-         * Возвращает количество криптовалюты.
-         * @return количество валюты
-         */
-        public Double getAmount() {
-            return amount;
-        }
-
-        /**
-         * Устанавливает количество криптовалюты.
-         * @param amount новое количество
-         */
-        public void setAmount(Double amount) {
-            this.amount = amount;
-        }
-
-        /**
-         * Возвращает ссылку на отслеживаемую криптовалюту.
-         * @return объект {@link TrackedCryptoCurrency}
-         */
-        public TrackedCryptoCurrency getTrackedCrypto() {
-            return trackedCrypto;
-        }
-
-        /**
-         * Устанавливает ссылку на отслеживаемую криптовалюту.
-         * @param trackedCrypto новый объект криптовалюты
-         */
-        public void setTrackedCrypto(TrackedCryptoCurrency trackedCrypto) {
-            this.trackedCrypto = trackedCrypto;
-        }
-
-        /**
-         * Возвращает дату добавления актива.
-         * @return временная метка добавления
-         */
-        public Instant getAddedAt() {
-            return addedAt;
-        }
-
-        /**
-         * Устанавливает дату добавления актива.
-         * @param addedAt новая временная метка
-         */
-        public void setAddedAt(Instant addedAt) {
-            this.addedAt = addedAt;
-        }
-
-        /**
-         * Создает новый криптовалютный актив.
-         * @param trackedCrypto отслеживаемая криптовалюта
-         * @param amount количество валюты
-         */
-
-        public CryptoHolding(TrackedCryptoCurrency trackedCrypto, Double amount) {
-            this.trackedCrypto = trackedCrypto;
-            this.amount = amount;
-            this.addedAt = Instant.now();
-        }
-    }
-
-    /**
-     * Создает новый портфель с указанным именем.
-     * @param name название портфеля
-     */
-    public Portfolio (String name){
-        this.name = name;
-    }
-
-
-
-
-
 }

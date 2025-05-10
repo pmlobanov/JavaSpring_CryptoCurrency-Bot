@@ -1,39 +1,33 @@
 package spbstu.mcs.telegramBot.cryptoApi;
 import lombok.extern.slf4j.Slf4j;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Scope;
-import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import spbstu.mcs.telegramBot.cryptoApi.model.Currency.Fiat;
-import spbstu.mcs.telegramBot.service.KafkaConsumerService;
+import spbstu.mcs.telegramBot.model.Currency.Fiat;
 
 import java.math.BigDecimal;
 
 /**
  * Сервис для получения курсов валют.
  */
-
-@Component
-@Scope("singleton")
+@Service
+@Slf4j
 public class CurrencyConverter {
-    private static final Logger log = LoggerFactory.getLogger(BitBotX.class);
     private final WebClient webClient;
     private final ObjectMapper objectMapper;
     private final String apiUrl;
 
-    public CurrencyConverter(
-            @Value("${currency.api.url}") String apiUrl,
-            ObjectMapper objectMapper) {
-        this.apiUrl = apiUrl;
+    @Autowired
+    public CurrencyConverter(WebClient.Builder webClientBuilder,
+                           ObjectMapper objectMapper,
+                           @Value("${currency.api.url:https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies}") String apiUrl) {
+        this.webClient = webClientBuilder.baseUrl(apiUrl).build();
         this.objectMapper = objectMapper;
-        this.webClient = WebClient.builder()
-                .baseUrl(apiUrl)
-                .build();
+        this.apiUrl = apiUrl;
     }
 
     /**

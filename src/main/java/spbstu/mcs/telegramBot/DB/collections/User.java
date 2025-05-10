@@ -2,9 +2,11 @@ package spbstu.mcs.telegramBot.DB.collections;
 
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.PersistenceConstructor;
+import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
-import spbstu.mcs.telegramBot.DB.currencies.CryptoCurrency;
-import spbstu.mcs.telegramBot.DB.currencies.FiatCurrency;
+import org.springframework.data.mongodb.core.mapping.Field;
+import spbstu.mcs.telegramBot.model.Currency;
+import java.beans.ConstructorProperties;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -16,20 +18,19 @@ import java.util.List;
  * <p>Основные характеристики пользователя:</p>
  * <ul>
  *   <li>Имя в Telegram</li>
- *   <li>Предпочитаемая фиатная валюта</li>
- *   <li>Валюта по умолчанию для криптоопераций</li>
+ *   <li>ID чата в Telegram</li>
  *   <li>Списки идентификаторов портфелей и уведомлений</li>
  * </ul>
  *
  * <p>Пример использования:</p>
  * <pre>{@code
- * User user = new User("john_doe", FiatCurrency.USD, CryptoCurrency.BTC);
+ * User user = new User("john_doe", Currency.Fiat.USD, Currency.Crypto.BTC);
  * user.addPortfolioId("portfolio123");
  * }</pre>
  *
  * @see Document
- * @see FiatCurrency
- * @see CryptoCurrency
+ * @see Currency.Fiat
+ * @see Currency.Crypto
  */
 @Document(collection = "users")
 public class User {
@@ -37,35 +38,59 @@ public class User {
     @Id
     private String id;
 
+    @Field("userTgName")
     private String userTgName;
-    private FiatCurrency fiatCurrency;
-    private CryptoCurrency defaultCryptoCurrrency;
+    
+    @Indexed(unique = true)
+    @Field("chatId")
+    private String chatId;
 
-    public void setNotificationIds(List<String> notificationIds) {
-        this.notificationIds = notificationIds;
-    }
-
-    public void setPortfolioIds(List<String> portfolioIds) {
-        this.portfolioIds = portfolioIds;
-    }
-
-    // Ссылки на портфели (храним только ID)
+    @Field("portfolioIds")
     private List<String> portfolioIds;
+
+    @Field("notificationIds")
     private List<String> notificationIds;
 
+    @Field("hasStarted")
+    private boolean hasStarted;
+
     /**
-     * Конструктор для создания нового пользователя.
-     * Аннотация @PersistenceConstructor указывает Spring Data MongoDB на использование этого конструктора при загрузке из БД.
+     * Конструктор без параметров для Spring Data MongoDB
+     */
+    public User() {
+        this.portfolioIds = new ArrayList<>();
+        this.notificationIds = new ArrayList<>();
+        this.hasStarted = false;
+    }
+
+    /**
+     * Создает нового пользователя с указанными параметрами.
      *
      * @param userTgName имя пользователя в Telegram
-     * @param fiatCurrency  предпочитаемая фиатная валюта
-     * @param defaultCryptoCurrrency  криптовалюта по умолчанию
+     * @param chatId ID чата пользователя в Telegram
      */
-    @PersistenceConstructor
-    public User(String userTgName, FiatCurrency fiatCurrency , CryptoCurrency defaultCryptoCurrrency ) {
+    public User(String userTgName, String chatId) {
         this.userTgName = userTgName;
-        this.defaultCryptoCurrrency = defaultCryptoCurrrency ;
-        this.fiatCurrency = fiatCurrency ;
+        this.chatId = chatId;
+        this.portfolioIds = new ArrayList<>();
+        this.notificationIds = new ArrayList<>();
+        this.hasStarted = false;
+    }
+
+    /**
+     * Создает нового пользователя с указанными параметрами.
+     *
+     * @param userTgName имя пользователя в Telegram
+     * @param chatId ID чата пользователя в Telegram
+     * @param portfolioIds список идентификаторов портфелей
+     * @param notificationIds список идентификаторов уведомлений
+     */
+    public User(String userTgName, String chatId, List<String> portfolioIds, List<String> notificationIds) {
+        this.userTgName = userTgName;
+        this.chatId = chatId;
+        this.portfolioIds = portfolioIds != null ? portfolioIds : new ArrayList<>();
+        this.notificationIds = notificationIds != null ? notificationIds : new ArrayList<>();
+        this.hasStarted = false;
     }
 
     /**
@@ -126,6 +151,22 @@ public class User {
         if (notificationIds != null) notificationIds.remove(notificationId);
     }
 
+    /**
+     * Устанавливает список идентификаторов уведомлений пользователя.
+     * @param notificationIds новый список ID уведомлений
+     */
+    public void setNotificationIds(List<String> notificationIds) {
+        this.notificationIds = notificationIds;
+    }
+
+    /**
+     * Устанавливает список идентификаторов портфелей пользователя.
+     * @param portfolioIds новый список ID портфелей
+     */
+    public void setPortfolioIds(List<String> portfolioIds) {
+        this.portfolioIds = portfolioIds;
+    }
+
     // Сеттеры
 
     /**
@@ -137,45 +178,27 @@ public class User {
     }
 
     /**
-     * Устанавливает предпочитаемую фиатную валюту.
-     * @param fiatCurrency новая фиатная валюта
+     * Устанавливает ID чата пользователя в Telegram.
+     * @param chatId новое ID чата пользователя
      */
-    public void setFiatCurrency(FiatCurrency fiatCurrency) {
-        this.fiatCurrency = fiatCurrency;
+    public void setChatId(String chatId) {
+        this.chatId = chatId;
     }
 
     /**
-     * Устанавливает криптовалюту по умолчанию.
-     * @param defaultCryptoCurrrency новая криптовалюта по умолчанию
+     * Возвращает ID чата пользователя в Telegram.
+     * @return ID чата пользователя
      */
-    public void setDefaultCryptoCurrrency(CryptoCurrency defaultCryptoCurrrency) {
-        this.defaultCryptoCurrrency = defaultCryptoCurrrency;
-    }
-
-    // Геттеры
-
-    /**
-     * Возвращает предпочитаемую фиатную валюту пользователя.
-     * @return фиатная валюта
-     */
-    public FiatCurrency getFiatCurrency() {
-        return fiatCurrency;
+    public String getChatId() {
+        return chatId;
     }
 
     /**
      * Возвращает имя пользователя в Telegram.
-     * @return имя пользователя
+     * @return имя пользователя в Telegram
      */
     public String getUserTgName() {
         return userTgName;
-    }
-
-    /**
-     * Возвращает криптовалюту по умолчанию.
-     * @return криптовалюта по умолчанию
-     */
-    public CryptoCurrency getDefaultCryptoCurrrency() {
-        return defaultCryptoCurrrency;
     }
 
     /**
@@ -187,10 +210,17 @@ public class User {
         return "User{" +
                 "id='" + id + '\'' +
                 ", userTgName='" + userTgName + '\'' +
-                ", fiatCurrency=" + fiatCurrency +
-                ", defaultCryptoCurrrency=" + defaultCryptoCurrrency +
+                ", chatId='" + chatId + '\'' +
                 ", portfolioIds=" + portfolioIds +
                 ", notificationIds=" + notificationIds +
                 '}';
+    }
+
+    public boolean isHasStarted() {
+        return hasStarted;
+    }
+
+    public void setHasStarted(boolean hasStarted) {
+        this.hasStarted = hasStarted;
     }
 }

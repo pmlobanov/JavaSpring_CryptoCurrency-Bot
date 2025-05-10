@@ -7,7 +7,10 @@ import spbstu.mcs.telegramBot.DB.services.*;
 import spbstu.mcs.telegramBot.DB.services.UserService;
 import spbstu.mcs.telegramBot.DB.services.PortfolioService;
 import spbstu.mcs.telegramBot.DB.services.NotificationService;
-import spbstu.mcs.telegramBot.DB.services.TrackedCryptoService;
+import spbstu.mcs.telegramBot.service.BotCommand;
+import spbstu.mcs.telegramBot.config.ApiConfig;
+import spbstu.mcs.telegramBot.config.TelegramConfig;
+import spbstu.mcs.telegramBot.config.SchedulingConfig;
 /**
  * Менеджер для управления Spring контекстом и доступа к сервисам приложения.
  * Реализует {@link AutoCloseable} для автоматического закрытия контекста при использовании в try-with-resources.
@@ -38,8 +41,8 @@ public class ApplicationContextManager implements AutoCloseable {
     private UserService userService;
     private PortfolioService portfolioService;
     private NotificationService notificationService;
-    private TrackedCryptoService trackedCryptoService;
     private MongoTemplate mongoTemplate;
+    private BotCommand botCommand;
 
     /**
      * Конструктор менеджера. Инициализирует Spring контекст и загружает сервисы.
@@ -49,15 +52,20 @@ public class ApplicationContextManager implements AutoCloseable {
         initializeServices();
     }
 
-
     /**
      * Инициализирует Spring контекст, если он ещё не был создан.
      */
     private void initializeContext() {
         if (context == null) {
-            context = new AnnotationConfigApplicationContext(MongoConfig.class);// Важно: не забывайте refresh()
+            context = new AnnotationConfigApplicationContext();
+            context.register(MongoConfig.class, ApiConfig.class, TelegramConfig.class, SchedulingConfig.class);
+            context.scan("spbstu.mcs.telegramBot.DB", 
+                        "spbstu.mcs.telegramBot.service",
+                        "spbstu.mcs.telegramBot.cryptoApi");
+            context.refresh();
         }
     }
+
     /**
      * Загружает сервисы из Spring контекста.
      */
@@ -65,8 +73,8 @@ public class ApplicationContextManager implements AutoCloseable {
         this.userService = context.getBean(UserService.class);
         this.portfolioService = context.getBean(PortfolioService.class);
         this.notificationService = context.getBean(NotificationService.class);
-        this.trackedCryptoService = context.getBean(TrackedCryptoService.class);
         this.mongoTemplate = context.getBean(MongoTemplate.class);
+        this.botCommand = context.getBean(BotCommand.class);
     }
 
     /**
@@ -93,12 +101,13 @@ public class ApplicationContextManager implements AutoCloseable {
         return notificationService;
     }
 
+
     /**
-     * Возвращает сервис для работы с отслеживаемыми криптовалютами.
-     * @return экземпляр {@link TrackedCryptoService}
+     * Возвращает сервис для работы с командами бота.
+     * @return экземпляр {@link BotCommand}
      */
-    public TrackedCryptoService getTrackedCryptoService() {
-        return trackedCryptoService;
+    public BotCommand getBotCommand() {
+        return botCommand;
     }
 
     /**

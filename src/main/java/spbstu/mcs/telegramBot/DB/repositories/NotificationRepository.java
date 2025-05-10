@@ -3,7 +3,7 @@ package spbstu.mcs.telegramBot.DB.repositories;
 import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.stereotype.Repository;
 import spbstu.mcs.telegramBot.DB.collections.Notification;
-import spbstu.mcs.telegramBot.DB.currencies.CryptoCurrency;
+import spbstu.mcs.telegramBot.model.Currency;
 
 import java.util.List;
 
@@ -22,7 +22,7 @@ import java.util.List;
  * <pre>{@code
  * // Найти все активные уведомления для BTC
  * List<Notification> btcAlerts = notificationRepository
- *     .findByCryptoCurrencyAndIsActiveTrue(CryptoCurrency.BTC);
+ *     .findByCryptoCurrencyAndIsActiveTrue(Currency.Crypto.BTC);
  *
  * // Найти активные уведомления пользователя
  * List<Notification> userAlerts = notificationRepository
@@ -31,9 +31,15 @@ import java.util.List;
  *
  * @see MongoRepository
  * @see Notification
- * @see CryptoCurrency
+ * @see Currency.Crypto
  */
 
+@Repository
 public interface NotificationRepository extends MongoRepository<Notification, String> {
-
+    List<Notification> findByCryptoCurrencyAndIsActiveTrue(Currency.Crypto cryptoCurrency);
+    List<Notification> findByIsActiveTrue();
+    List<Notification> findByChatIdAndIsActiveTrue(String chatId);
+    List<Notification> findByChatId(String chatId);
+    List<Notification> findByChatIdAndCryptoCurrencyAndThresholdType(String chatId, Currency.Crypto cryptoCurrency, Notification.ThresholdType thresholdType);
+    void deleteByChatId(String chatId);
 }
