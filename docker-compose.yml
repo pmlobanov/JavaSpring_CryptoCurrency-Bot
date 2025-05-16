@@ -1,0 +1,114 @@
+services:
+  zookeeper:
+    image: zookeeper:3.8
+    ports:
+      - "2181:2181"
+    environment:
+      ZOO_MY_ID: 1
+      ZOO_SERVERS: server.1=zookeeper:2888:3888;2181
+    networks:
+      - app-network
+
+  kafka:
+    image: bitnami/kafka:3.7
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      # Явное указание режима с Zookeeper
+      KAFKA_MODE: "zookeeper"
+      KAFKA_CFG_ZOOKEEPER_CONNECT: "zookeeper:2181"
+
+      # Полная конфигурация слушателей
+      KAFKA_CFG_LISTENERS: "PLAINTEXT://:9092,PLAINTEXT_HOST://:29092"
+      KAFKA_CFG_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092"
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+
+      # Разрешение незащищенных соединений для разработки
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+
+      # Автосоздание топиков
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+    depends_on:
+      - zookeeper
+    networks:
+      - app-network
+
+  mongodb:
+    image: mongo:5.0
+    container_name: mongodb
+    restart: always
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=root
+      - MONGO_INITDB_ROOT_PASSWORD=example
+      - MONGO_INITDB_DATABASE=BitBotDB
+    volumes:
+      - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+      - mongodb_data:/data/db
+    healthcheck:
+      test: mongo --eval 'db.runCommand("ping").ok' --quiet localhost:27017/admin --username root --password example || exit 1
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    command: ["--auth"]
+    networks:
+      - app-network
+
+  vault:
+    image: hashicorp/vault:1.15
+    container_name: vault
+    ports:
+      - "8200:8200"
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: "root"
+      VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+    cap_add:
+      - IPC_LOCK
+    volumes:
+      - vault_data:/vault/file
+    networks:
+      - app-network
+
+  vault-init:
+    image: hashicorp/vault:1.15
+    depends_on:
+      - vault
+    entrypoint: ["sh", "-c", "apk add curl && ./vault-init.sh"]
+    environment:
+      VAULT_ADDR: "http://vault:8200"
+      VAULT_TOKEN: "root"
+    volumes:
+      - ./vault-init.sh:/vault-init.sh:ro
+    networks:
+      - app-network
+    restart: "on-failure"
+
+  app:
+    build:
+      context: .
+      args:
+        JAR_TASK: fatJar
+    depends_on:
+      - vault
+      - mongodb
+      - kafka
+    networks:
+      - app-network
+    ports:
+      - "8080:8080"
+    environment:
+      VAULT_ADDR: "http://vault:8200"
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  mongodb_data:
+    driver: local
+  vault_data:
+    driver: local
