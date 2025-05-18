@@ -42,14 +42,14 @@ services:
     ports:
       - "27017:27017"
     environment:
-      - MONGO_INITDB_ROOT_USERNAME=root
-      - MONGO_INITDB_ROOT_PASSWORD=example
-      - MONGO_INITDB_DATABASE=BitBotDB
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_INITDB_ROOT_USERNAME}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_INITDB_ROOT_PASSWORD}
+      - MONGO_INITDB_DATABASE=${MONGO_INITDB_DATABASE}
     volumes:
       - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
       - mongodb_data:/data/db
     healthcheck:
-      test: mongo --eval 'db.runCommand("ping").ok' --quiet mongodb:27017/admin --username root --password example || exit 1
+      test: mongo --eval 'db.runCommand("ping").ok' --quiet mongodb:27017/admin --username ${MONGO_INITDB_ROOT_USERNAME} --password ${MONGO_INITDB_ROOT_PASSWORD} || exit 1
       interval: 10s
       timeout: 10s
       retries: 5
@@ -64,7 +64,7 @@ services:
     ports:
       - "8200:8200"
     environment:
-      VAULT_DEV_ROOT_TOKEN_ID: "root"
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_ROOT_TOKEN_ID}
       VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
     cap_add:
       - IPC_LOCK
@@ -79,8 +79,8 @@ services:
       - vault
     entrypoint: ["sh", "./vault-init.sh"]
     environment:
-      VAULT_ADDR: "http://vault:8200"
-      VAULT_TOKEN: "root"
+      VAULT_ADDR: ${VAULT_ADDR}
+      VAULT_TOKEN: ${VAULT_TOKEN}
     volumes:
       - ./vault-init.sh:/vault-init.sh:ro
     networks:
