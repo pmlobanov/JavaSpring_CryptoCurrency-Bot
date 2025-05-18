@@ -17,18 +17,18 @@ echo "Авторизация успешна!"
 
 echo "Сохранение секретов в Vault..."
 vault kv put secret/crypto-bot \
-  telegram.bot.token="YOUR_TELEGRAM_BOT_TOKEN" \
-  telegram.bot.username="YOUR_TELEGRAM_BOT_USERNAME" \
-  kafka.bootstrap-servers="kafka:9092" \
-  kafka.consumer.group-id="telegram-bot-group" \
-  kafka.topics.incoming="telegram-incoming-messages" \
-  kafka.topics.outgoing="telegram-outgoing-messages" \
-  mongodb.connection-string="YOUR_MONGODB_CONNECTION_STRING" \
-  mongodb.database="YOUR_MONGODB_DATABASE" \
-  bingx.api.key="YOUR_BINGX_API_KEY" \
-  bingx.api.secret="YOUR_BINGX_API_SECRET" \
-  bingx.api.url="YOUR_BINGX_API_URL" \
-  currency.api.url="YOUR_CURRENCY_API_URL"
+  telegram.bot.token= \
+  telegram.bot.username= \
+  kafka.bootstrap-servers=\
+  kafka.consumer.group-id= \
+  kafka.topics.incoming= \
+  kafka.topics.outgoing=\
+  mongodb.connection-string= \
+  mongodb.database= \
+  bingx.api.key= \
+  bingx.api.secret= \
+  bingx.api.url= \
+  currency.api.url=
 
 echo "Секреты успешно сохранены в Vault!"
 echo "Инициализация завершена, продолжаем запуск приложения..." 
