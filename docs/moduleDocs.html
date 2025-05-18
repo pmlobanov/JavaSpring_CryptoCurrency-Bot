@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Документация Telegram Bot</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 30px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #3498db;
+        }
+        h2 {
+            color: #2980b9;
+            margin-top: 40px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #ddd;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            box-shadow: 0 2px 3px rgba(0,0,0,0.1);
+        }
+        th {
+            background-color: #3498db;
+            color: white;
+            padding: 12px;
+            text-align: left;
+        }
+        td {
+            padding: 12px;
+            border: 1px solid #ddd;
+            vertical-align: top;
+        }
+        tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+        .diagram {
+            background-color: white;
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin: 25px 0;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        .diagram img {
+            max-width: 100%;
+            height: auto;
+        }
+        .package {
+            font-family: monospace;
+            color: #c7254e;
+            background-color: #f9f2f4;
+            padding: 2px 4px;
+            border-radius: 3px;
+        }
+        .component {
+            margin: 5px 0;
+            padding-left: 15px;
+            position: relative;
+        }
+        .component:before {
+            content: "•";
+            position: absolute;
+            left: 0;
+            color: #3498db;
+        }
+        .service {
+            font-style: italic;
+            color: #27ae60;
+        }
+        .bean-ref {
+            color: #8e44ad;
+        }
+    </style>
+</head>
+<body>
+<h1>Документация Telegram Bot</h1>
+
+<!-- Application Section -->
+<h2>Application</h2>
+<div class="diagram">
+    <img src="images/diagrams/diagram_1.png" alt="Диаграмма Application">
+</div>
+
+<!-- DB Section -->
+<h2>DB</h2>
+<div class="diagram">
+    <img src="images/diagrams/DB_diagram.png" alt="Диаграмма DB">
+</div>
+<table>
+    <tr><th>Base package</th><td><span class="package">spbstu.mcs.telegramBot.DB</span></td></tr>
+    <tr>
+        <th>Spring components</th>
+        <td>
+            <div class="service">Services</div>
+            <div class="component">s.m.t.D.services.AdminService</div>
+            <div class="component">s.m.t.D.services.ApiKeyService</div>
+            <div class="component">s.m.t.D.services.NotificationService</div>
+            <div class="component">s.m.t.D.services.PortfolioService</div>
+            <div class="component">s.m.t.D.services.UserService</div>
+        </td>
+    </tr>
+    <tr>
+        <th>Bean references</th>
+        <td class="bean-ref">
+            <div class="component">s.m.t.s.EncryptionService (in Security)</div>
+        </td>
+    </tr>
+</table>
+
+<!-- Config Section -->
+<h2>Config</h2>
+<div class="diagram">
+    <img src="images/diagrams/config_diagram.png" alt="Диаграмма Config">
+</div>
+<table>
+    <tr><th>Base package</th><td><span class="package">spbstu.mcs.telegramBot.config</span></td></tr>
+    <tr>
+        <th>Spring components</th>
+        <td>
+            <div class="component">s.m.t.c.AppConfigurations</div>
+            <div class="component">s.m.t.c.ApiConfiguration</div>
+            <div class="component">s.m.t.c.KafkaConfiguration</div>
+            <div class="component">s.m.t.c.SecurityConfiguration</div>
+            <div class="component">s.m.t.c.TelegramConfiguration</div>
+            <div class="component">s.m.t.c.WebConfiguration</div>
+            <div class="component">s.m.t.c.ServerProperties</div>
+            <div class="component">s.m.t.c.LoggingConfig</div>
+            <div class="component">s.m.t.c.SchedulingConfig</div>
+            <div class="component">s.m.t.c.VaultConfig</div>
+        </td>
+    </tr>
+    <tr>
+        <th>Bean references</th>
+        <td class="bean-ref">
+            <div class="component">s.m.t.s.AdminAuthMiddleware (in Service)</div>
+            <div class="component">s.m.t.s.EncryptionService (in Security)</div>
+            <div class="component">s.m.t.D.services.UserService (in DB)</div>
+            <div class="component">s.m.t.D.services.AdminService (in DB)</div>
+        </td>
+    </tr>
+    <tr>
+        <th>Events listened to</th>
+        <td>
+            <div class="component">o.s.c.e.ContextStoppedEvent</div>
+        </td>
+    </tr>
+</table>
+
+<!-- Controller Section -->
+<h2>Controller</h2>
+<div class="diagram">
+    <img src="images/diagrams/controller_diagram.png" alt="Диаграмма Controller">
+</div>
+<table>
+    <tr><th>Base package</th><td><span class="package">spbstu.mcs.telegramBot.controller</span></td></tr>
+    <tr>
+        <th>Spring components</th>
+        <td>
+            <div class="component">s.m.t.c.AdminController</div>
+        </td>
+    </tr>
+    <tr>
+        <th>Bean references</th>
+        <td class="bean-ref">
+            <div class="component">s.m.t.D.services.AdminService (in DB)</div>
+            <div class="component">s.m.t.D.services.UserService (in DB)</div>
+            <div class="component">s.m.t.s.AdminAuthMiddleware (in Service)</div>
+            <div class="component">s.m.t.D.services.ApiKeyService (in DB)</div>
+        </td>
+    </tr>
+</table>
+
+<!-- CryptoApi Section -->
+<h2>CryptoApi</h2>
+<div class="diagram">
+    <img src="images/diagrams/cryptoApi_diagram.png" alt="Диаграмма CryptoApi">
+</div>
+<table>
+    <tr><th>Base package</th><td><span class="package">spbstu.mcs.telegramBot.cryptoApi</span></td></tr>
+    <tr>
+        <th>Spring components</th>
+        <td>
+            <div class="service">Services</div>
+            <div class="component">s.m.t.c.CryptoInformation</div>
+            <div class="component">s.m.t.c.CryptoPortfolioManager</div>
+            <div class="component">s.m.t.c.CurrencyConverter</div>
+            <div class="component">s.m.t.c.PriceFetcher</div>
+        </td>
+    </tr>
+    <tr>
+        <th>Bean references</th>
+        <td class="bean-ref">
+            <div class="component">s.m.t.D.services.PortfolioService (in DB)</div>
+        </td>
+    </tr>
+</table>
+
+<!-- Model Section -->
+<h2>Model</h2>
+<div class="diagram">
+    <img src="images/diagrams/model_diagram.png" alt="Диаграмма Model">
+</div>
+<table>
+    <tr><th>Base package</th><td><span class="package">spbstu.mcs.telegramBot.model</span></td></tr>
+</table>
+
+<!-- Security Section -->
+<h2>Security</h2>
+<div class="diagram">
+    <img src="images/diagrams/security_diagram.png" alt="Диаграмма Security">
+</div>
+<table>
+    <tr><th>Base package</th><td><span class="package">spbstu.mcs.telegramBot.security</span></td></tr>
+    <tr>
+        <th>Spring components</th>
+        <td>
+            <div class="service">Services</div>
+            <div class="component">s.m.t.s.EncryptionService</div>
+        </td>
+    </tr>
+</table>
+
+<!-- Server Section -->
+<h2>Server</h2>
+<div class="diagram">
+    <img src="images/diagrams/server_diagram.png" alt="Диаграмма Server">
+</div>
+<table>
+    <tr><th>Base package</th><td><span class="package">spbstu.mcs.telegramBot.server</span></td></tr>
+</table>
+
+<!-- Service Section -->
+<h2>Service</h2>
+<div class="diagram">
+    <img src="images/diagrams/service_diagram.png" alt="Диаграмма Service">
+</div>
+<table>
+    <tr><th>Base package</th><td><span class="package">spbstu.mcs.telegramBot.service</span></td></tr>
+    <tr>
+        <th>Spring components</th>
+        <td>
+            <div class="service">Services</div>
+            <div class="component">s.m.t.s.AlertsHandling</div>
+            <div class="component">s.m.t.s.BotCommand</div>
+            <div class="component">s.m.t.s.KafkaConsumerService</div>
+            <div class="component">s.m.t.s.KafkaProducerService</div>
+            <div class="component">s.m.t.s.PortfolioManagement</div>
+            <div class="component">s.m.t.s.TelegramBotService</div>
+
+            <div class="service">Others</div>
+            <div class="component">s.m.t.s.AdminAuthMiddleware</div>
+        </td>
+    </tr>
+    <tr>
+        <th>Bean references</th>
+        <td class="bean-ref">
+            <div class="component">s.m.t.D.services.AdminService (in DB)</div>
+            <div class="component">s.m.t.D.services.UserService (in DB)</div>
+            <div class="component">s.m.t.c.CurrencyConverter (in CryptoApi)</div>
+            <div class="component">s.m.t.c.PriceFetcher (in CryptoApi)</div>
+            <div class="component">s.m.t.D.services.NotificationService (in DB)</div>
+            <div class="component">s.m.t.c.CryptoInformation (in CryptoApi)</div>
+            <div class="component">s.m.t.D.services.PortfolioService (in DB)</div>
+            <div class="component">s.m.t.c.CryptoPortfolioManager (in CryptoApi)</div>
+        </td>
+    </tr>
+</table>
+
+<!-- Util Section -->
+<h2>Util</h2>
+<div class="diagram">
+    <img src="images/diagrams/util_diagram.png" alt="Диаграмма Util">
+</div>
+<table>
+    <tr><th>Base package</th><td><span class="package">spbstu.mcs.telegramBot.util</span></td></tr>
+</table>
+
+</body>
+</html>
