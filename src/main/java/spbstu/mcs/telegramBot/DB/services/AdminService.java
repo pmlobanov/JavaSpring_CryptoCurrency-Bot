@@ -1,23 +1,19 @@
 package spbstu.mcs.telegramBot.DB.services;
 
-import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import spbstu.mcs.telegramBot.DB.collections.Admin;
-import spbstu.mcs.telegramBot.security.EncryptionService;
-import reactor.core.publisher.Mono;
-import java.time.LocalDateTime;
-import java.util.UUID;
-import java.util.ArrayList;
-import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Criteria;
-import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Mono;
 import spbstu.mcs.telegramBot.DB.repositories.AdminRepository;
+import spbstu.mcs.telegramBot.model.Admin;
+import spbstu.mcs.telegramBot.security.EncryptionService;
+
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 @Service
 public class AdminService {
@@ -87,7 +83,9 @@ public class AdminService {
                 LocalDateTime now = LocalDateTime.now();
                 if (admin.getApiKeyExpiry() != null && now.isAfter(admin.getApiKeyExpiry())) {
                     log.warn("API key expired for admin: {}", admin.getUsername());
-                    return null;
+                    // Временно сохраняем открытый ключ для возврата
+                    admin.setEncryptedApiKey(apiKey);
+                    return admin;
                 }
                 
                 return admin;
@@ -113,17 +111,13 @@ public class AdminService {
                         LocalDateTime now = LocalDateTime.now();
                         if (admin.getApiKeyExpiry() != null && now.isAfter(admin.getApiKeyExpiry())) {
                             log.warn("API key expired for admin: {}", admin.getUsername());
-                            return null;
+                            // Временно сохраняем открытый ключ для возврата
+                            admin.setEncryptedApiKey(apiKey);
+                            return admin;
                         }
                         
                         return admin;
                     }
-                    
-                    // Debug: also try encrypting the input key and comparing to stored encrypted key
-                    log.info("Comparing encrypted keys - Stored: {}, Generated: {}", 
-                        storedEncryptedKey.substring(0, Math.min(10, storedEncryptedKey.length())),
-                        encryptedInputKey.substring(0, Math.min(10, encryptedInputKey.length())));
-                            
                 } catch (Exception e) {
                     log.error("Error processing API key for admin {}: {}", admin.getUsername(), e.getMessage());
                 }
@@ -189,5 +183,9 @@ public class AdminService {
      */
     public List<Admin> findAll() {
         return adminRepository.findAll();
+    }
+
+    public void save(Admin newAdmin){
+        this.adminRepository.save(newAdmin);
     }
 } 

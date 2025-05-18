@@ -4,16 +4,16 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import spbstu.mcs.telegramBot.model.Currency;
 import spbstu.mcs.telegramBot.cryptoApi.CryptoInformation;
-import spbstu.mcs.telegramBot.cryptoApi.AlertsHandling;
+import spbstu.mcs.telegramBot.service.AlertsHandling;
 import spbstu.mcs.telegramBot.DB.services.UserService;
-import spbstu.mcs.telegramBot.DB.collections.User;
+import spbstu.mcs.telegramBot.model.User;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import reactor.core.publisher.Mono;
 import java.math.BigDecimal;
 import org.springframework.stereotype.Service;
 import spbstu.mcs.telegramBot.DB.services.NotificationService;
-import spbstu.mcs.telegramBot.DB.collections.Notification;
+import spbstu.mcs.telegramBot.model.Notification;
 import java.util.List;
 import java.util.ArrayList;
 import reactor.core.publisher.Flux;
@@ -26,7 +26,7 @@ import java.util.Comparator;
 import java.util.stream.Collectors;
 import java.util.Map;
 import spbstu.mcs.telegramBot.DB.services.PortfolioService;
-import spbstu.mcs.telegramBot.DB.collections.Portfolio;
+import spbstu.mcs.telegramBot.model.Portfolio;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import spbstu.mcs.telegramBot.cryptoApi.CryptoPortfolioManager;
@@ -716,7 +716,7 @@ public class BotCommand {
                 for (Notification notification : notifications) {
                     String type = notification.getThresholdType().toString();
                     String symbol = notification.getCryptoCurrency().toString();
-                    String fiat = Currency.Fiat.getCurrentFiat().getCode();
+                    String fiat = notification.getFiatCurrency().getCode();
                     
                     String typeEmoji = switch (type) {
                         case "VALUE" -> "💰";
@@ -730,7 +730,7 @@ public class BotCommand {
                     // Получаем текущую цену в USD и конвертируем в валюту из БД
                     alertPriceMonos.add(Mono.zip(
                         priceFetcher.getCurrentPrice(notification.getCryptoCurrency()),
-                        currencyConverter.getUsdToFiatRate(Currency.Fiat.getCurrentFiat())
+                        currencyConverter.getUsdToFiatRate(notification.getFiatCurrency())
                     ).flatMap(tuple -> {
                         try {
                             JsonNode node = objectMapper.readTree(tuple.getT1());

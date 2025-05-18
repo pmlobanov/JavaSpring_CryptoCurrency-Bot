@@ -23,7 +23,7 @@ import java.time.Duration;
 
 import spbstu.mcs.telegramBot.model.Currency.Crypto;
 import spbstu.mcs.telegramBot.model.Currency.Fiat;
-import spbstu.mcs.telegramBot.DB.collections.Portfolio;
+import spbstu.mcs.telegramBot.model.Portfolio;
 import spbstu.mcs.telegramBot.DB.services.PortfolioService;
 import spbstu.mcs.telegramBot.model.Currency;
 

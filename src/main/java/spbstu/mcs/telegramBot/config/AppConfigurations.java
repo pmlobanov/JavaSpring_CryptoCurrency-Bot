@@ -17,6 +17,14 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.springframework.data.mongodb.repository.config.EnableMongoRepositories;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory;
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import org.bson.Document;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -27,24 +35,54 @@ import java.util.HashMap;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 import spbstu.mcs.telegramBot.controller.AdminController;
-import spbstu.mcs.telegramBot.security.AdminAuthMiddleware;
+import spbstu.mcs.telegramBot.service.AdminAuthMiddleware;
 import spbstu.mcs.telegramBot.DB.services.AdminService;
 import spbstu.mcs.telegramBot.DB.services.UserService;
 import spbstu.mcs.telegramBot.cryptoApi.*;
 import spbstu.mcs.telegramBot.service.TelegramBotService;
 import spbstu.mcs.telegramBot.DB.services.NotificationService;
 import spbstu.mcs.telegramBot.DB.repositories.NotificationRepository;
+import spbstu.mcs.telegramBot.service.AlertsHandling;
+import spbstu.mcs.telegramBot.DB.repositories.AdminRepository;
+import spbstu.mcs.telegramBot.security.EncryptionService;
+
+import java.time.LocalDateTime;
 
 /**
  * Unified configuration file that organizes multiple configurations into logical sections.
  * This reduces the number of configuration files in the codebase by grouping them by functionality.
  */
 @Configuration
+@EnableMongoRepositories(basePackages = "spbstu.mcs.telegramBot.DB.repositories")
 @Slf4j
 public class AppConfigurations {
 
     @Autowired
     private VaultConfig vaultConfig;
+
+    @Bean
+    public MongoClient mongoClient() {
+        String mongoUri = vaultConfig.getSecret("secret/data/crypto-bot", "mongodb.connection-string");
+        log.info("MongoDB connection string for internal use: {}", mongoUri);
+        log.info("MongoDB connection string for external access (MongoDB Compass): mongodb://root:example@localhost:27017/BitBotDB?authSource=admin");
+        return MongoClients.create(mongoUri);
+    }
+
+    @Bean
+    public MongoTemplate mongoTemplate() {
+        String database = vaultConfig.getSecret("secret/data/crypto-bot", "mongodb.database");
+        return new MongoTemplate(new SimpleMongoClientDatabaseFactory(mongoClient(), database));
+    }
+
+    @Bean
+    public MongoCollection<Document> userCollection(MongoTemplate mongoTemplate) {
+        return mongoTemplate.getCollection("users");
+    }
+
+    @Bean
+    public EncryptionService encryptionService() {
+        return new EncryptionService();
+    }
     
     /**
      * Web configuration section including server properties and routing
@@ -52,10 +90,10 @@ public class AppConfigurations {
     @Configuration
     public class WebConfiguration {
         
-        @Value("${server.host:localhost}")
+        @Value("${server.host}")
         private String serverHost;
         
-        @Value("${server.port:8080}")
+        @Value("${server.port}")
         private int serverPort;
         
         /**
@@ -100,7 +138,7 @@ public class AppConfigurations {
             return RouterFunctions
                 .route()
                 // Health check endpoint
-                .GET("/api/health", request -> 
+                .GET("/healthcheck", request -> 
                     ServerResponse.ok().bodyValue(Map.of("status", "Server is running", "version", "1.0.0")))
                 // Admin routes
                 .GET("/api/admin/users", adminController::getUsers)
@@ -182,6 +220,16 @@ public class AppConfigurations {
             factory.setConsumerFactory(consumerFactory());
             return factory;
         }
+
+        @Bean
+        public String kafkaIncomingTopic() {
+            return vaultConfig.getSecret("secret/data/crypto-bot", "kafka.topics.incoming");
+        }
+
+        @Bean
+        public String kafkaOutgoingTopic() {
+            return vaultConfig.getSecret("secret/data/crypto-bot", "kafka.topics.outgoing");
+        }
     }
     
     /**
@@ -223,7 +271,8 @@ public class AppConfigurations {
         @Lazy
         private AdminAuthMiddleware adminAuthMiddleware;
         
-        // ====================== CRYPTO API BEANS ======================
+        @Autowired
+        private EncryptionService encryptionService;
         
         @Bean
         public PriceFetcher priceFetcher(WebClient.Builder webClientBuilder, ObjectMapper objectMapper) {
@@ -238,94 +287,21 @@ public class AppConfigurations {
             String currencyApiUrl = vaultConfig.getSecret("secret/data/crypto-bot", "currency.api.url");
             return new CurrencyConverter(webClientBuilder, objectMapper, currencyApiUrl);
         }
-
+        
         @Bean
         public CryptoInformation cryptoInformation(ObjectMapper objectMapper, CurrencyConverter currencyConverter, PriceFetcher priceFetcher) {
             return new CryptoInformation(objectMapper, currencyConverter, priceFetcher);
         }
-
+        
         @Bean
         public AlertsHandling alertsHandling(ObjectMapper objectMapper, 
                                             CurrencyConverter currencyConverter,
                                             PriceFetcher priceFetcher,
                                             TelegramBotService telegramBotService,
                                             NotificationService notificationService,
-                                            NotificationRepository notificationRepository,
                                             UserService userService) {
-            return new AlertsHandling(objectMapper, currencyConverter, priceFetcher, telegramBotService, 
-                                    notificationService, notificationRepository, userService);
-        }
-        
-        // ====================== SECURITY BEANS ======================
-        
-        @Bean
-        public CommandSecurityHandler commandSecurityHandler() {
-            return new CommandSecurityHandler(adminAuthMiddleware, userService, adminService);
-        }
-
-        /**
-         * Обработчик для защищенных команд
-         */
-        public class CommandSecurityHandler {
-            private final AdminAuthMiddleware adminAuthMiddleware;
-            private final UserService userService;
-            private final AdminService adminService;
-
-            public CommandSecurityHandler(AdminAuthMiddleware adminAuthMiddleware, 
-                                        UserService userService,
-                                        AdminService adminService) {
-                this.adminAuthMiddleware = adminAuthMiddleware;
-                this.userService = userService;
-                this.adminService = adminService;
-            }
-
-            /**
-             * Проверяет доступ к команде /users
-             * @param command команда для проверки
-             * @param authHeader заголовок авторизации
-             * @return Mono<Boolean> true, если доступ разрешен
-             */
-            public Mono<Boolean> canAccessUsersCommand(String command, String authHeader) {
-                if (!"/users".equals(command)) {
-                    return Mono.just(false);
-                }
-
-                if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-                    log.warn("Invalid authorization header format: {}", authHeader);
-                    return Mono.just(false);
-                }
-                
-                String apiKey = authHeader.substring("Bearer ".length()).trim();
-                log.info("Extracted API key from header: {}", apiKey.substring(0, 4) + "..." + apiKey.substring(apiKey.length() - 4));
-                
-                return adminService.validateApiKey(apiKey)
-                    .map(admin -> {
-                        log.info("Admin validated successfully: {}", admin.getUsername());
-                        return true;
-                    })
-                    .defaultIfEmpty(false)
-                    .doOnError(error -> log.error("Error validating API key: {}", error.getMessage()));
-            }
-
-            /**
-             * Получает список всех пользователей (только для администраторов)
-             * @return Mono<String> текстовое представление списка пользователей
-             */
-            public Mono<String> getUsersList() {
-                return userService.getAllUsers()
-                    .collectList()
-                    .map(users -> {
-                        StringBuilder sb = new StringBuilder("Список пользователей:\n\n");
-                        users.forEach(user -> 
-                            sb.append(String.format("ID: %s\nUsername: %s\nСтатус: %s\n\n", 
-                                user.getId(), 
-                                user.getUserTgName(), 
-                                user.isHasStarted() ? "Активен" : "Неактивен"))
-                        );
-                        return sb.toString();
-                    })
-                    .doOnError(error -> log.error("Error getting users list: {}", error.getMessage()));
-            }
+            return new AlertsHandling(objectMapper, currencyConverter, priceFetcher, 
+                                    telegramBotService, notificationService, userService);
         }
     }
 } 

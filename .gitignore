@@ -62,21 +62,3 @@ yarn-error.log*
 
 ### OS ###
 Thumbs.db
-
-### Project Specific ###
-kafka-data/
-target/
-*.db
-
-### Security ###
-*.pem
-*.key
-*.crt
-*.jks
-*.p12
-
-### Temporary Files ###
-*~
-.*.swp
-.*.swo
-node_modules/

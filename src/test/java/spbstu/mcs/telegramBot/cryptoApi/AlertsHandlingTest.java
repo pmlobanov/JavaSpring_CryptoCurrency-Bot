@@ -1,45 +1,35 @@
 package spbstu.mcs.telegramBot.cryptoApi;
 
-import static org.junit.Assert.*;
-import static org.mockito.Mockito.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.anyDouble;
-import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doNothing;
-
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.JUnit4;
-
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.fasterxml.jackson.core.JsonProcessingException;
-
-import org.springframework.web.reactive.function.client.WebClient;
-import reactor.core.publisher.Mono;
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.JUnit4;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
-
-import java.math.BigDecimal;
-import java.util.Arrays;
-import java.util.List;
-import java.util.ArrayList;
-
-import spbstu.mcs.telegramBot.DB.collections.Notification;
 import spbstu.mcs.telegramBot.DB.repositories.NotificationRepository;
 import spbstu.mcs.telegramBot.DB.services.NotificationService;
 import spbstu.mcs.telegramBot.DB.services.UserService;
 import spbstu.mcs.telegramBot.model.Currency;
 import spbstu.mcs.telegramBot.model.Currency.Crypto;
+import spbstu.mcs.telegramBot.model.Notification;
+import spbstu.mcs.telegramBot.model.User;
+import spbstu.mcs.telegramBot.service.AlertsHandling;
 import spbstu.mcs.telegramBot.service.TelegramBotService;
-import spbstu.mcs.telegramBot.cryptoApi.CurrencyConverter;
-import spbstu.mcs.telegramBot.DB.collections.User;
-import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.anyLong;
+import static org.mockito.Mockito.*;
 
 /**
  * Тесты для AlertsHandling
@@ -86,7 +76,7 @@ public class AlertsHandlingTest {
             priceFetcher,
             telegramBotService,
             notificationService,
-            notificationRepository,
+            ///notificationRepository,
             userService
         );
     }

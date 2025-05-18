@@ -1,23 +1,16 @@
 package spbstu.mcs.telegramBot.DB.services;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Criteria;
-import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
-import spbstu.mcs.telegramBot.DB.collections.Portfolio;
+import reactor.core.publisher.Mono;
 import spbstu.mcs.telegramBot.DB.repositories.PortfolioRepository;
 import spbstu.mcs.telegramBot.DB.repositories.UserRepository;
 import spbstu.mcs.telegramBot.model.Currency;
-import spbstu.mcs.telegramBot.DB.collections.User;
-import spbstu.mcs.telegramBot.cryptoApi.CurrencyConverter;
-import spbstu.mcs.telegramBot.cryptoApi.PriceFetcher;
-import spbstu.mcs.telegramBot.DB.services.UserService;
-import reactor.core.publisher.Mono;
-import org.springframework.context.annotation.Lazy;
+import spbstu.mcs.telegramBot.model.Portfolio;
+import spbstu.mcs.telegramBot.model.User;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -41,8 +34,8 @@ public class PortfolioService {
     private final PortfolioRepository portfolioRepository;
     private final UserRepository userRepository;
     private final UserService userService;
-    private final PriceFetcher priceFetcher;
-    private final CurrencyConverter currencyConverter;
+ //   private final PriceFetcher priceFetcher;
+//    private final CurrencyConverter currencyConverter;
     private final ObjectMapper objectMapper;
 
     @Autowired
@@ -52,14 +45,14 @@ public class PortfolioService {
     public PortfolioService(PortfolioRepository portfolioRepository, 
                           UserRepository userRepository,
                           @Lazy UserService userService,
-                          PriceFetcher priceFetcher,
-                          CurrencyConverter currencyConverter,
+                         // PriceFetcher priceFetcher,
+                          //CurrencyConverter currencyConverter,
                           ObjectMapper objectMapper) {
         this.portfolioRepository = portfolioRepository;
         this.userRepository = userRepository;
         this.userService = userService;
-        this.priceFetcher = priceFetcher;
-        this.currencyConverter = currencyConverter;
+    //    this.priceFetcher = priceFetcher;
+    //    this.currencyConverter = currencyConverter;
         this.objectMapper = objectMapper;
     }
 
@@ -220,34 +213,34 @@ public class PortfolioService {
         });
     }
 
-    public Mono<String> getPortfolioValue(String portfolioId) {
-        return Mono.fromCallable(() -> {
-            Portfolio portfolio = portfolioRepository.findById(portfolioId)
-                .orElseThrow(() -> new RuntimeException("Portfolio not found"));
-
-            if (portfolio.getCryptoCurrency() == null) {
-                return Mono.just("Портфель пуст");
-            }
-
-            return priceFetcher.getCurrentPrice(portfolio.getCryptoCurrency())
-                .flatMap(priceJson -> {
-                    try {
-                        JsonNode node = objectMapper.readTree(priceJson);
-                        BigDecimal currentPrice = new BigDecimal(node.get("price").asText());
-                        BigDecimal totalValue = portfolio.getCount().multiply(currentPrice);
-                        
-                        portfolio.setLastCryptoPrice(currentPrice);
-                        portfolio.setLastCryptoPriceTimestamp(System.currentTimeMillis() / 1000);
-                        portfolioRepository.save(portfolio);
-
-                        return Mono.just(String.format("💰 Стоимость портфеля: %.2f", 
-                            totalValue));
-                    } catch (Exception e) {
-                        return Mono.error(e);
-                    }
-                });
-        }).flatMap(mono -> mono);
-    }
+//    public Mono<String> getPortfolioValue(String portfolioId) {
+//        return Mono.fromCallable(() -> {
+//            Portfolio portfolio = portfolioRepository.findById(portfolioId)
+//                .orElseThrow(() -> new RuntimeException("Portfolio not found"));
+//
+//            if (portfolio.getCryptoCurrency() == null) {
+//                return Mono.just("Портфель пуст");
+//            }
+//
+//            return priceFetcher.getCurrentPrice(portfolio.getCryptoCurrency())
+//                .flatMap(priceJson -> {
+//                    try {
+//                        JsonNode node = objectMapper.readTree(priceJson);
+//                        BigDecimal currentPrice = new BigDecimal(node.get("price").asText());
+//                        BigDecimal totalValue = portfolio.getCount().multiply(currentPrice);
+//
+//                        portfolio.setLastCryptoPrice(currentPrice);
+//                        portfolio.setLastCryptoPriceTimestamp(System.currentTimeMillis() / 1000);
+//                        portfolioRepository.save(portfolio);
+//
+//                        return Mono.just(String.format("💰 Стоимость портфеля: %.2f",
+//                            totalValue));
+//                    } catch (Exception e) {
+//                        return Mono.error(e);
+//                    }
+//                });
+//        }).flatMap(mono -> mono);
+//    }
 
     public Portfolio save(Portfolio portfolio) {
         return portfolioRepository.save(portfolio);
@@ -256,5 +249,17 @@ public class PortfolioService {
     public Portfolio delete(Portfolio portfolio) {
         portfolioRepository.delete(portfolio);
         return portfolio;
+    }
+
+    public Optional<Portfolio> findById(String portfolioId) {
+        return this.portfolioRepository.findById(portfolioId);
+    }
+
+    public List<Portfolio> findByChatId(String chatId) {
+        return this.portfolioRepository.findByChatId(chatId);
+    }
+
+    public void deleteById(String testPortfolioId) {
+        this.portfolioRepository.deleteById(testPortfolioId);
     }
 }

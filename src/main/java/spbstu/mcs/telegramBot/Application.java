@@ -4,9 +4,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.modulith.Modulithic;
 import org.telegram.telegrambots.meta.TelegramBotsApi;
 import org.telegram.telegrambots.updatesreceivers.DefaultBotSession;
-import spbstu.mcs.telegramBot.config.ApplicationConfig;
 import spbstu.mcs.telegramBot.service.KafkaConsumerService;
 import spbstu.mcs.telegramBot.service.KafkaProducerService;
 import spbstu.mcs.telegramBot.service.TelegramBotService;
@@ -14,6 +14,7 @@ import spbstu.mcs.telegramBot.server.ServerApp;
 import spbstu.mcs.telegramBot.config.AppConfigurations;
 import java.util.List;
 
+@Modulithic
 public class Application {
     private static final Logger logger = LoggerFactory.getLogger(Application.class);
 
@@ -117,7 +118,7 @@ public class Application {
                 if (adminService.findByUsername(username).isEmpty()) {
                     // Создаем и сохраняем админа в БД
                     logger.info("Creating new admin: {} in MongoDB collection 'admins'", username);
-                    spbstu.mcs.telegramBot.DB.collections.Admin admin = 
+                    spbstu.mcs.telegramBot.model.Admin admin =
                         adminService.createAdmin(username).block();
                     
                     if (admin != null) {
@@ -147,7 +148,7 @@ public class Application {
             }
             
             // Проверка общего количества админов в базе данных
-            List<spbstu.mcs.telegramBot.DB.collections.Admin> allAdmins = adminService.findAll();
+            List<spbstu.mcs.telegramBot.model.Admin> allAdmins = adminService.findAll();
             logger.info("Total admins in database: {}", allAdmins.size());
             logger.info("------------------------------------------------------------");
             

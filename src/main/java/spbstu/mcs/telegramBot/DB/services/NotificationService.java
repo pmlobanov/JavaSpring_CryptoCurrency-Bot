@@ -1,19 +1,18 @@
 package spbstu.mcs.telegramBot.DB.services;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import spbstu.mcs.telegramBot.DB.collections.Notification;
 import spbstu.mcs.telegramBot.DB.repositories.NotificationRepository;
-import spbstu.mcs.telegramBot.cryptoApi.PriceFetcher;
-import spbstu.mcs.telegramBot.model.Currency;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import spbstu.mcs.telegramBot.DB.collections.User;
 import spbstu.mcs.telegramBot.DB.repositories.UserRepository;
+import spbstu.mcs.telegramBot.model.Currency;
+import spbstu.mcs.telegramBot.model.Notification;
+import spbstu.mcs.telegramBot.model.User;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -37,18 +36,18 @@ import java.util.Optional;
 public class NotificationService {
     private final NotificationRepository notificationRepository;
     private final MongoTemplate mongoTemplate;
-    private final PriceFetcher priceFetcher;
+  //  private final PriceFetcher priceFetcher;
     private final UserRepository userRepository;
     private static final Logger log = LoggerFactory.getLogger(NotificationService.class);
 
     @Autowired
     public NotificationService(NotificationRepository notificationRepository, 
                              MongoTemplate mongoTemplate,
-                             PriceFetcher priceFetcher,
+                             //PriceFetcher priceFetcher,
                              @Lazy UserRepository userRepository) {
         this.notificationRepository = notificationRepository;
         this.mongoTemplate = mongoTemplate;
-        this.priceFetcher = priceFetcher;
+       // this.priceFetcher = priceFetcher;
         this.userRepository = userRepository;
     }
 
@@ -104,33 +103,33 @@ public class NotificationService {
             .switchIfEmpty(Mono.error(new NoSuchElementException("Notification not found with id: " + id)));
     }
 
-    public Mono<Boolean> checkAlert(Notification notification) {
-        Currency.Crypto crypto = notification.getCryptoCurrency();
-        return priceFetcher.getCurrentPrice(crypto)
-                .map(priceJson -> {
-                    try {
-                        BigDecimal currentPrice = new BigDecimal(priceJson);
-                        Double threshold = notification.getActiveThreshold();
-                        
-                        switch (notification.getThresholdType()) {
-                            case VALUE:
-                                return currentPrice.compareTo(BigDecimal.valueOf(threshold)) > 0;
-                            case PERCENT:
-                                BigDecimal percentageChange = BigDecimal.valueOf(threshold);
-                                BigDecimal currentPercentage = currentPrice
-                                    .multiply(new BigDecimal("100"))
-                                    .divide(BigDecimal.valueOf(threshold), 4, BigDecimal.ROUND_HALF_UP);
-                                return currentPercentage.compareTo(percentageChange) > 0;
-                            case EMA:
-                                return currentPrice.compareTo(BigDecimal.valueOf(threshold)) > 0;
-                            default:
-                                return false;
-                        }
-                    } catch (Exception e) {
-                        return false;
-                    }
-                });
-    }
+//    public Mono<Boolean> checkAlert(Notification notification) {
+//        Currency.Crypto crypto = notification.getCryptoCurrency();
+//        return priceFetcher.getCurrentPrice(crypto)
+//                .map(priceJson -> {
+//                    try {
+//                        BigDecimal currentPrice = new BigDecimal(priceJson);
+//                        Double threshold = notification.getActiveThreshold();
+//
+//                        switch (notification.getThresholdType()) {
+//                            case VALUE:
+//                                return currentPrice.compareTo(BigDecimal.valueOf(threshold)) > 0;
+//                            case PERCENT:
+//                                BigDecimal percentageChange = BigDecimal.valueOf(threshold);
+//                                BigDecimal currentPercentage = currentPrice
+//                                    .multiply(new BigDecimal("100"))
+//                                    .divide(BigDecimal.valueOf(threshold), 4, BigDecimal.ROUND_HALF_UP);
+//                                return currentPercentage.compareTo(percentageChange) > 0;
+//                            case EMA:
+//                                return currentPrice.compareTo(BigDecimal.valueOf(threshold)) > 0;
+//                            default:
+//                                return false;
+//                        }
+//                    } catch (Exception e) {
+//                        return false;
+//                    }
+//                });
+//    }
 
     public Mono<Boolean> checkAlert(Notification notification, BigDecimal currentPrice, BigDecimal startPrice) {
         return Mono.just(notification)

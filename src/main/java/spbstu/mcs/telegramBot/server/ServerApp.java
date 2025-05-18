@@ -1,46 +1,32 @@
 package spbstu.mcs.telegramBot.server;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
+import com.sun.net.httpserver.HttpServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import com.sun.net.httpserver.HttpServer;
-import com.sun.net.httpserver.HttpHandler;
-import com.sun.net.httpserver.HttpExchange;
 import org.springframework.web.reactive.function.server.RouterFunction;
 import org.springframework.web.reactive.function.server.ServerResponse;
-import spbstu.mcs.telegramBot.config.AppConfigurations;
+import reactor.core.publisher.Mono;
 import spbstu.mcs.telegramBot.DB.services.AdminService;
 import spbstu.mcs.telegramBot.DB.services.ApiKeyService;
 import spbstu.mcs.telegramBot.DB.services.UserService;
-import spbstu.mcs.telegramBot.DB.repositories.AdminRepository;
-import spbstu.mcs.telegramBot.DB.collections.Admin;
-import spbstu.mcs.telegramBot.DB.collections.User;
-import spbstu.mcs.telegramBot.security.AdminAuthMiddleware;
+import spbstu.mcs.telegramBot.config.AppConfigurations;
+import spbstu.mcs.telegramBot.cryptoApi.PriceFetcher;
+import spbstu.mcs.telegramBot.model.Admin;
+import spbstu.mcs.telegramBot.model.Currency;
 import spbstu.mcs.telegramBot.security.EncryptionService;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import spbstu.mcs.telegramBot.config.LoggingConfig;
-import org.springframework.beans.factory.annotation.Autowired;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.nio.file.StandardOpenOption;
+import spbstu.mcs.telegramBot.service.AdminAuthMiddleware;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
+import java.io.*;
 import java.net.InetSocketAddress;
+import java.nio.file.Files;
+import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
-import java.util.Optional;
-import java.util.LinkedHashMap;
-import java.io.File;
-import reactor.core.publisher.Mono;
-import java.util.ArrayList;
-import spbstu.mcs.telegramBot.cryptoApi.PriceFetcher;
-import spbstu.mcs.telegramBot.model.Currency;
 
 public class ServerApp {
     private static final Logger logger = LoggerFactory.getLogger(ServerApp.class);
@@ -51,7 +37,7 @@ public class ServerApp {
     private final UserService userService;
     private final AdminAuthMiddleware adminAuthMiddleware;
     private final EncryptionService encryptionService;
-    private final AdminRepository adminRepository;
+    //private final AdminRepository adminService;
     private final ApiKeyService apiKeyService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final PriceFetcher priceFetcher;
@@ -68,7 +54,7 @@ public class ServerApp {
                     UserService userService,
                     AdminAuthMiddleware adminAuthMiddleware,
                     EncryptionService encryptionService,
-                    AdminRepository adminRepository,
+                    //AdminRepository adminRepository,
                     ApiKeyService apiKeyService,
                     PriceFetcher priceFetcher,
                     String logFilePath,
@@ -81,7 +67,7 @@ public class ServerApp {
         this.userService = userService;
         this.adminAuthMiddleware = adminAuthMiddleware;
         this.encryptionService = encryptionService;
-        this.adminRepository = adminRepository;
+        //this.adminRepository = adminRepository;
         this.apiKeyService = apiKeyService;
         this.priceFetcher = priceFetcher;
         this.logFilePath = logFilePath;
@@ -92,9 +78,13 @@ public class ServerApp {
 
     public void start() {
         try {
-            // Очищаем файл логов при запуске
-            java.nio.file.Files.write(java.nio.file.Paths.get(logFilePath), new byte[0], StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE);
-
+            // Проверяем существование файла логов
+            File logFile = new File(logFilePath);
+            if (!logFile.exists()) {
+                logger.error("Log file does not exist at: {}", logFilePath);
+                throw new IOException("Log file not found: " + logFilePath);
+            }
+            
             server = HttpServer.create(new InetSocketAddress(serverProperties.host(), serverProperties.port()), 0);
             
             // Health check endpoint - accessible without authentication
@@ -245,7 +235,7 @@ public class ServerApp {
                                         // Update the admin with the new key
                         admin.setEncryptedApiKey(encryptedKey);
                         admin.setApiKeyExpiry(expirationDate);
-                        adminRepository.save(admin);
+                        adminService.save(admin);
                         
                         Map<String, Object> responseMap = new LinkedHashMap<>();
                         responseMap.put("message", "Admin token refreshed successfully");
@@ -324,7 +314,7 @@ public class ServerApp {
                         boolean keyExpired = false;
                         
                         // Получаем всех админов через репозиторий
-                        List<Admin> admins = adminRepository.findAll();
+                        List<Admin> admins = adminService.findAll();
                         for (Admin admin : admins) {
                             // Получаем зашифрованный ключ админа
                             String encryptedKey = admin.getEncryptedApiKey();
@@ -359,7 +349,7 @@ public class ServerApp {
                             
                             foundAdmin.setEncryptedApiKey(newEncryptedKey);
                             foundAdmin.setApiKeyExpiry(expirationDate);
-                            adminRepository.save(foundAdmin);
+                            adminService.save(foundAdmin);
                             
                             Map<String, Object> responseMap = new LinkedHashMap<>();
                             responseMap.put("status", 401);
@@ -775,7 +765,7 @@ public class ServerApp {
         // Update admin with new key
         admin.setEncryptedApiKey(newEncryptedKey);
         admin.setApiKeyExpiry(expirationDate);
-        adminRepository.save(admin);
+        adminService.save(admin);
         
         Map<String, Object> responseMap = new LinkedHashMap<>();
         responseMap.put("status", 401);

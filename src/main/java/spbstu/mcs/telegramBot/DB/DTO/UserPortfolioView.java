@@ -1,7 +1,6 @@
 package spbstu.mcs.telegramBot.DB.DTO;
-
-import spbstu.mcs.telegramBot.DB.collections.Notification;
-import spbstu.mcs.telegramBot.DB.collections.Portfolio;
+import spbstu.mcs.telegramBot.model.Portfolio;
+import spbstu.mcs.telegramBot.model.Notification;
 import spbstu.mcs.telegramBot.DB.repositories.UserRepository;
 
 import java.util.List;

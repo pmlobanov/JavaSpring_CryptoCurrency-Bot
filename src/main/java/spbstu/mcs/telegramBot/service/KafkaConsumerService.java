@@ -30,10 +30,10 @@ public class KafkaConsumerService implements Runnable {
     @Autowired
     public KafkaConsumerService(
             TelegramBotService botService,
-            @Value("${kafka.bootstrap-servers:localhost:29092}") String bootstrapServers,
-            @Value("${kafka.consumer.group-id:telegram-bot-group}") String groupId,
-            @Value("${kafka.topics.incoming:telegram-incoming-messages}") String incomingTopic,
-            @Value("${kafka.topics.outgoing:telegram-outgoing-messages}") String outgoingTopic) {
+            @Value("${kafka.bootstrap-servers}") String bootstrapServers,
+            @Value("${kafka.consumer.group-id}") String groupId,
+            @Value("${kafka.topics.incoming}") String incomingTopic,
+            @Value("${kafka.topics.outgoing}") String outgoingTopic) {
         this.botService = botService;
         this.incomingTopic = incomingTopic;
         this.outgoingTopic = outgoingTopic;

@@ -1,6 +1,5 @@
 package spbstu.mcs.telegramBot.DB.services;
 
-import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Updates;
@@ -10,23 +9,17 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Criteria;
-import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
-import spbstu.mcs.telegramBot.DB.collections.User;
-import spbstu.mcs.telegramBot.DB.collections.Notification;
-import spbstu.mcs.telegramBot.DB.collections.Portfolio;
-import spbstu.mcs.telegramBot.DB.DTO.UserPortfolioView;
-import reactor.core.publisher.Mono;
 import reactor.core.publisher.Flux;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.NoSuchElementException;
-import java.util.Objects;
-import java.util.stream.Collectors;
+import reactor.core.publisher.Mono;
+import spbstu.mcs.telegramBot.DB.DTO.UserPortfolioView;
+import spbstu.mcs.telegramBot.model.Notification;
+import spbstu.mcs.telegramBot.model.Portfolio;
+import spbstu.mcs.telegramBot.model.User;
 import spbstu.mcs.telegramBot.util.ChatIdMasker;
+
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Сервис для управления пользователями и их данными.

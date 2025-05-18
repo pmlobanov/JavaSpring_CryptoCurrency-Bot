@@ -1,33 +1,29 @@
 package spbstu.mcs.telegramBot.cryptoApi;
 
-import static org.junit.Assert.*;
-import static org.mockito.Mockito.*;
-import static org.mockito.ArgumentMatchers.*;
-
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
-
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonMappingException;
-
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
+import spbstu.mcs.telegramBot.DB.repositories.PortfolioRepository;
+import spbstu.mcs.telegramBot.DB.services.PortfolioService;
+import spbstu.mcs.telegramBot.service.PortfolioManagement;
+import spbstu.mcs.telegramBot.model.Currency.Crypto;
+import spbstu.mcs.telegramBot.model.Portfolio;
 
 import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
-import spbstu.mcs.telegramBot.DB.collections.Portfolio;
-import spbstu.mcs.telegramBot.DB.repositories.PortfolioRepository;
-import spbstu.mcs.telegramBot.DB.services.PortfolioManagement;
-import spbstu.mcs.telegramBot.model.Currency;
-import spbstu.mcs.telegramBot.model.Currency.Crypto;
+import static org.junit.Assert.*;
+import static org.mockito.Mockito.*;
 
 /**
  * Тесты для CryptoPortfolioManager
@@ -35,7 +31,7 @@ import spbstu.mcs.telegramBot.model.Currency.Crypto;
 @RunWith(JUnit4.class)
 public class CryptoPortfolioManagerTest {
 
-    private PortfolioRepository portfolioRepository;
+    private PortfolioService portfolioService;
     private PriceFetcher priceFetcher;
     private CurrencyConverter currencyConverter;
     private ObjectMapper objectMapper;
@@ -51,7 +47,7 @@ public class CryptoPortfolioManagerTest {
     @Before
     public void setUp() throws JsonMappingException, JsonProcessingException {
         // Создаем моки вручную
-        portfolioRepository = mock(PortfolioRepository.class);
+        portfolioService= mock(PortfolioService.class);
         priceFetcher = mock(PriceFetcher.class);
         currencyConverter = mock(CurrencyConverter.class);
         objectMapper = mock(ObjectMapper.class);
@@ -63,7 +59,7 @@ public class CryptoPortfolioManagerTest {
         when(objectMapper.readTree(anyString())).thenReturn(jsonNode);
         
         portfolioManagement = new PortfolioManagement(
-            portfolioRepository,
+                portfolioService,
             priceFetcher,
             currencyConverter,
             objectMapper
@@ -82,7 +78,7 @@ public class CryptoPortfolioManagerTest {
         portfolio.setLastCryptoPrice(new BigDecimal("45000"));
         
         // Настройка мока для получения портфеля по ID
-        when(portfolioRepository.findById(TEST_PORTFOLIO_ID))
+        when(portfolioService.findById(TEST_PORTFOLIO_ID))
             .thenReturn(Optional.of(portfolio));
         
         // Выполнение тестируемого метода
@@ -99,7 +95,7 @@ public class CryptoPortfolioManagerTest {
             .verify(java.time.Duration.ofSeconds(5));
         
         // Проверка вызовов
-        verify(portfolioRepository).findById(TEST_PORTFOLIO_ID);
+        verify(portfolioService).findById(TEST_PORTFOLIO_ID);
     }
     
     /**
@@ -113,7 +109,7 @@ public class CryptoPortfolioManagerTest {
         portfolio.setCount(new BigDecimal("1.5"));
         
         // Настройка мока для получения портфеля по ID
-        when(portfolioRepository.findById(TEST_PORTFOLIO_ID))
+        when(portfolioService.findById(TEST_PORTFOLIO_ID))
             .thenReturn(Optional.of(portfolio));
         
         // Создаем конкретный JSON-ответ для цены
@@ -132,7 +128,7 @@ public class CryptoPortfolioManagerTest {
         when(priceNode.get("price")).thenReturn(priceNode);
         
         // Настройка мока для сохранения портфеля
-        when(portfolioRepository.save(any(Portfolio.class)))
+        when(portfolioService.save(any(Portfolio.class)))
             .thenReturn(portfolio);
         
         // Выполнение тестируемого метода с таймаутом для предотвращения зависания
@@ -149,9 +145,9 @@ public class CryptoPortfolioManagerTest {
             .verify(java.time.Duration.ofSeconds(5));
         
         // Проверка вызовов
-        verify(portfolioRepository).findById(TEST_PORTFOLIO_ID);
+        verify(portfolioService).findById(TEST_PORTFOLIO_ID);
         verify(priceFetcher).getCurrentPrice(Crypto.BTC);
-        verify(portfolioRepository).save(any(Portfolio.class));
+        verify(portfolioService).save(any(Portfolio.class));
     }
     
     /**
@@ -172,7 +168,7 @@ public class CryptoPortfolioManagerTest {
             List<Portfolio> portfolios = Arrays.asList(portfolio1, portfolio2);
             
             // Настройка мока для получения портфелей по chatId
-            doReturn(portfolios).when(portfolioRepository).findByChatId(TEST_CHAT_ID);
+            doReturn(portfolios).when(portfolioService).findByChatId(TEST_CHAT_ID);
             
             // Выполнение тестируемого метода с таймаутом
             List<Portfolio> result = portfolioManagement.getPortfoliosByChatId(TEST_CHAT_ID);
@@ -184,7 +180,7 @@ public class CryptoPortfolioManagerTest {
             assertEquals("Второй портфель должен содержать ETH", Crypto.ETH, result.get(1).getCryptoCurrency());
             
             // Проверка вызовов
-            verify(portfolioRepository, times(1)).findByChatId(TEST_CHAT_ID);
+            verify(portfolioService, times(1)).findByChatId(TEST_CHAT_ID);
         } catch (Exception e) {
             fail("Тест завершился с ошибкой: " + e.getMessage());
         }
@@ -202,7 +198,7 @@ public class CryptoPortfolioManagerTest {
             portfolio.setCount(new BigDecimal("1.5"));
             
             // Настройка мока для сохранения портфеля
-            doReturn(portfolio).when(portfolioRepository).save(portfolio);
+            doReturn(portfolio).when(portfolioService).save(portfolio);
             
             // Выполнение тестируемого метода
             Portfolio result = portfolioManagement.save(portfolio);
@@ -213,7 +209,7 @@ public class CryptoPortfolioManagerTest {
             assertEquals("Количество должно быть 1.5", new BigDecimal("1.5"), result.getCount());
             
             // Проверка вызовов
-            verify(portfolioRepository, times(1)).save(portfolio);
+            verify(portfolioService, times(1)).save(portfolio);
         } catch (Exception e) {
             fail("Тест завершился с ошибкой: " + e.getMessage());
         }
@@ -233,10 +229,10 @@ public class CryptoPortfolioManagerTest {
             expectedPortfolio.setCount(new BigDecimal("1.5"));
             
             // Настройка мока для получения портфеля по ID
-            doReturn(Optional.of(expectedPortfolio)).when(portfolioRepository).findById(TEST_PORTFOLIO_ID);
+            doReturn(Optional.of(expectedPortfolio)).when(portfolioService).findById(TEST_PORTFOLIO_ID);
             
             // Выполнение тестируемого метода
-            Optional<Portfolio> result = portfolioRepository.findById(TEST_PORTFOLIO_ID);
+            Optional<Portfolio> result = portfolioService.findById(TEST_PORTFOLIO_ID);
             
             // Проверка результата
             assertTrue("Результат должен содержать портфель", result.isPresent());
@@ -245,7 +241,7 @@ public class CryptoPortfolioManagerTest {
             assertEquals("Количество должно быть 1.5", new BigDecimal("1.5"), result.get().getCount());
             
             // Проверка вызовов
-            verify(portfolioRepository, times(1)).findById(TEST_PORTFOLIO_ID);
+            verify(portfolioService, times(1)).findById(TEST_PORTFOLIO_ID);
         } catch (Exception e) {
             fail("Тест завершился с ошибкой: " + e.getMessage());
         }
@@ -269,11 +265,11 @@ public class CryptoPortfolioManagerTest {
             updatedPortfolio.setCount(new BigDecimal("2.5")); // 1.0 + 1.5
             
             // Мокируем поведение репозитория - используем doReturn для предотвращения реальных вызовов
-            doReturn(Optional.of(initialPortfolio)).when(portfolioRepository).findById(TEST_PORTFOLIO_ID);
-            doReturn(updatedPortfolio).when(portfolioRepository).save(any(Portfolio.class));
+            doReturn(Optional.of(initialPortfolio)).when(portfolioService).findById(TEST_PORTFOLIO_ID);
+            doReturn(updatedPortfolio).when(portfolioService).save(any(Portfolio.class));
             
             // Проверяем, что портфель существует
-            Optional<Portfolio> foundPortfolio = portfolioRepository.findById(TEST_PORTFOLIO_ID);
+            Optional<Portfolio> foundPortfolio = portfolioService.findById(TEST_PORTFOLIO_ID);
             assertTrue("Портфель должен быть найден", foundPortfolio.isPresent());
             
             // Добавляем монеты в портфель и сохраняем
@@ -281,7 +277,7 @@ public class CryptoPortfolioManagerTest {
             BigDecimal oldAmount = portfolio.getCount();
             BigDecimal amountToAdd = new BigDecimal("1.5");
             portfolio.setCount(oldAmount.add(amountToAdd));
-            Portfolio saved = portfolioRepository.save(portfolio);
+            Portfolio saved = portfolioService.save(portfolio);
             
             // Проверяем результат
             assertNotNull("Сохраненный портфель не должен быть null", saved);
@@ -290,8 +286,8 @@ public class CryptoPortfolioManagerTest {
             assertEquals("Новое количество должно быть 2.5", new BigDecimal("2.5"), saved.getCount());
             
             // Проверка вызовов
-            verify(portfolioRepository).findById(TEST_PORTFOLIO_ID);
-            verify(portfolioRepository).save(any(Portfolio.class));
+            verify(portfolioService).findById(TEST_PORTFOLIO_ID);
+            verify(portfolioService).save(any(Portfolio.class));
         } catch (Exception e) {
             fail("Тест завершился с ошибкой: " + e.getMessage());
         }
@@ -314,21 +310,21 @@ public class CryptoPortfolioManagerTest {
         updatedPortfolio.setCount(new BigDecimal("1.0")); // 2.5 - 1.5
         
         // Мокируем поведение репозитория
-        when(portfolioRepository.findById(TEST_PORTFOLIO_ID)).thenReturn(Optional.of(initialPortfolio));
-        when(portfolioRepository.save(any(Portfolio.class))).thenReturn(updatedPortfolio);
+        when(portfolioService.findById(TEST_PORTFOLIO_ID)).thenReturn(Optional.of(initialPortfolio));
+        when(portfolioService.save(any(Portfolio.class))).thenReturn(updatedPortfolio);
         
         // Вызываем метод для удаления криптовалюты из портфеля
         BigDecimal amountToRemove = new BigDecimal("1.5");
         
         // Получаем портфель
-        Optional<Portfolio> portfolioOpt = portfolioRepository.findById(TEST_PORTFOLIO_ID);
+        Optional<Portfolio> portfolioOpt = portfolioService.findById(TEST_PORTFOLIO_ID);
         assertTrue(portfolioOpt.isPresent());
         
         // Удаляем криптовалюту и сохраняем
         Portfolio portfolio = portfolioOpt.get();
         BigDecimal newAmount = portfolio.getCount().subtract(amountToRemove);
         portfolio.setCount(newAmount);
-        Portfolio result = portfolioRepository.save(portfolio);
+        Portfolio result = portfolioService.save(portfolio);
         
         // Проверяем результат
         assertNotNull("Результат не должен быть null", result);
@@ -337,8 +333,8 @@ public class CryptoPortfolioManagerTest {
         assertEquals("Новое количество должно быть 1.0", new BigDecimal("1.0"), result.getCount());
         
         // Проверка вызовов
-        verify(portfolioRepository).findById(TEST_PORTFOLIO_ID);
-        verify(portfolioRepository).save(any(Portfolio.class));
+        verify(portfolioService).findById(TEST_PORTFOLIO_ID);
+        verify(portfolioService).save(any(Portfolio.class));
     }
     
     /**
@@ -359,15 +355,15 @@ public class CryptoPortfolioManagerTest {
             newPortfolio.setCount(amount);
             
             // Настройка мока для сохранения нового портфеля - используем doReturn для предотвращения реальных вызовов
-            doReturn(newPortfolio).when(portfolioRepository).save(any(Portfolio.class));
-            
+            doReturn(newPortfolio).when(portfolioService).save(any(Portfolio.class));
+
             // Создаем новый портфель
             Portfolio portfolioToSave = new Portfolio(chatId);
             portfolioToSave.setCryptoCurrency(crypto);
             portfolioToSave.setCount(amount);
             
             // Выполняем тестируемый метод напрямую
-            Portfolio saved = portfolioRepository.save(portfolioToSave);
+            Portfolio saved = portfolioService.save(portfolioToSave);
             
             // Проверяем результат
             assertNotNull("Сохраненный портфель не должен быть null", saved);
@@ -377,7 +373,7 @@ public class CryptoPortfolioManagerTest {
             assertEquals("Количество должно быть 5.0", amount, saved.getCount());
             
             // Проверяем вызов метода сохранения
-            verify(portfolioRepository, times(1)).save(any(Portfolio.class));
+            verify(portfolioService, times(1)).save(any(Portfolio.class));
         } catch (Exception e) {
             fail("Тест завершился с ошибкой: " + e.getMessage());
         }
@@ -390,13 +386,13 @@ public class CryptoPortfolioManagerTest {
     public void testDeletePortfolio() {
         try {
             // Настройка мока для удаления портфеля
-            doNothing().when(portfolioRepository).deleteById(TEST_PORTFOLIO_ID);
+            doNothing().when(portfolioService).deleteById(TEST_PORTFOLIO_ID);
             
             // Удаляем портфель
-            portfolioRepository.deleteById(TEST_PORTFOLIO_ID);
+            portfolioService.deleteById(TEST_PORTFOLIO_ID);
             
             // Проверяем вызовы
-            verify(portfolioRepository).deleteById(TEST_PORTFOLIO_ID);
+            verify(portfolioService).deleteById(TEST_PORTFOLIO_ID);
         } catch (Exception e) {
             fail("Тест завершился с ошибкой: " + e.getMessage());
         }

@@ -36,6 +36,10 @@ dependencies {
     implementation("org.springframework.security:spring-security-web:6.1.3")
     implementation("org.springframework.security:spring-security-core:6.1.3")
 
+    //Modulith
+    implementation("org.springframework.modulith:spring-modulith-core:1.1.3")
+    implementation("org.springframework.modulith:spring-modulith-docs:1.3.1") // для генерации документации
+
     // Spring Data MongoDB
     implementation("org.springframework.data:spring-data-mongodb:4.2.0")
     implementation("org.mongodb:mongodb-driver-sync:4.11.1")
@@ -57,7 +61,8 @@ dependencies {
 
     // Logging
     implementation("org.slf4j:slf4j-api:2.0.9")
-    implementation("org.slf4j:slf4j-simple:2.0.9")
+    implementation("ch.qos.logback:logback-classic:1.4.14")
+    implementation("ch.qos.logback:logback-core:1.4.14")
 
     // Spring Vault
     implementation("org.springframework.vault:spring-vault-core:3.1.2")

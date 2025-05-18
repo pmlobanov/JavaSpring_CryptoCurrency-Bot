@@ -16,6 +16,7 @@ import spbstu.mcs.telegramBot.model.Currency.Crypto;
 import spbstu.mcs.telegramBot.model.Currency.Fiat;
 import java.math.BigDecimal;
 import java.time.Duration;
+import reactor.util.retry.Retry;
 
 /**
  * Сервис для получения цен с биржи BingX
@@ -86,7 +87,7 @@ public class PriceFetcher {
                         throw new RuntimeException(e);
                     }
                 })
-                .retryWhen(reactor.util.retry.Retry.fixedDelay(3, Duration.ofMillis(300))
+                .retryWhen(Retry.backoff(3, Duration.ofSeconds(1))
                     .doBeforeRetry(signal -> 
                         log.warn("Retrying price fetch for {} after error: {}", symbol, signal.failure().getMessage())
                     )
@@ -149,6 +150,11 @@ public class PriceFetcher {
                         throw new RuntimeException(e);
                     }
                 })
+                .retryWhen(Retry.backoff(3, Duration.ofSeconds(1))
+                    .doBeforeRetry(signal -> 
+                        log.warn("Retrying candlestick data fetch for {} after error: {}", symbol, signal.failure().getMessage())
+                    )
+                )
                 .doOnError(error -> log.error("Error fetching candlestick data for {}: {}", symbol, error.getMessage()));
     }
 
@@ -181,6 +187,11 @@ public class PriceFetcher {
                         throw new RuntimeException(e);
                     }
                 })
+                .retryWhen(Retry.backoff(3, Duration.ofSeconds(1))
+                    .doBeforeRetry(signal -> 
+                        log.warn("Retrying fiat rate fetch for {} after error: {}", fiat.getCode(), signal.failure().getMessage())
+                    )
+                )
                 .doOnError(error -> log.error("Error fetching fiat rate for {}: {}", fiat, error.getMessage()));
     }
 
@@ -210,6 +221,11 @@ public class PriceFetcher {
                         throw new RuntimeException(e);
                     }
                 })
+                .retryWhen(Retry.backoff(3, Duration.ofSeconds(1))
+                    .doBeforeRetry(signal -> 
+                        log.warn("Retrying crypto price fetch for {} after error: {}", symbol, signal.failure().getMessage())
+                    )
+                )
                 .doOnError(error -> log.error("Error fetching price for {}: {}", crypto, error.getMessage()));
     }
 }

@@ -2,7 +2,7 @@ package spbstu.mcs.telegramBot.DB.repositories;
 
 import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.stereotype.Repository;
-import spbstu.mcs.telegramBot.DB.collections.Admin;
+import spbstu.mcs.telegramBot.model.Admin;
 
 import java.util.List;
 import java.util.Optional;

@@ -1,8 +1,8 @@
 db = db.getSiblingDB('BitBotDB');
 
 db.createUser({
-  user: "appuser",
-  pwd: "apppassword",
+  user: "Robert_Polson",
+  pwd: "here123",
   roles: [
     { role: "readWrite", db: "BitBotDB" },
     { role: "dbAdmin", db: "BitBotDB" }
@@ -16,6 +16,5 @@ db.createCollection('users');
 db.createCollection('admins');
 
 // Создаем индексы для быстрого поиска
-db.users.createIndex({ "telegramId": 1 }, { unique: true });
 db.admins.createIndex({ "username": 1 }, { unique: true });
 

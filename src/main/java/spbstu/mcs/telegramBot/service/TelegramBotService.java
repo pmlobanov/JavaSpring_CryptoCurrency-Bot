@@ -13,9 +13,9 @@ import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.springframework.beans.factory.annotation.Qualifier;
 import spbstu.mcs.telegramBot.DB.services.UserService;
-import spbstu.mcs.telegramBot.DB.collections.User;
+import spbstu.mcs.telegramBot.model.User;
 import org.telegram.telegrambots.meta.api.objects.Chat;
-import spbstu.mcs.telegramBot.security.AdminAuthMiddleware;
+import spbstu.mcs.telegramBot.service.AdminAuthMiddleware;
 import org.springframework.beans.factory.annotation.Value;
 import spbstu.mcs.telegramBot.util.ChatIdMasker;
 
@@ -106,13 +106,12 @@ public class TelegramBotService extends TelegramLongPollingBot {
                             return Mono.just(existingUser);
                         }
                     })
-                    .switchIfEmpty(Mono.defer(() -> {
-                        // Пользователь не существует, создаем нового
+                    .switchIfEmpty(Mono.fromCallable(() -> {
                         log.info("User does not exist, creating new user with hasStarted=true for chatId: {}", maskedChatId);
                         User newUser = new User(null, chatId);
                         newUser.setHasStarted(true);
-                        return userService.save(newUser);
-                    }))
+                        return newUser;
+                    }).flatMap(userService::save))
                     .doOnSuccess(user -> {
                         log.info("User processed with hasStarted=true for chatId: {}, now sending to Kafka", maskedChatId);
                         // Отправляем сообщение в Kafka ТОЛЬКО после успешного сохранения пользователя
@@ -237,13 +236,14 @@ public class TelegramBotService extends TelegramLongPollingBot {
                     return userService.save(user)
                         .then(Mono.just(botCommand.handlerStart(String.join(" ", args))));
                 })
-                .switchIfEmpty(Mono.defer(() -> {
+                .switchIfEmpty(Mono.fromCallable(() -> {
                     log.info("Creating new user in processCommand for chatId: {}", chatId);
                     User newUser = new User(null, chatId);
                     newUser.setHasStarted(true);
-                    return userService.save(newUser)
-                        .then(Mono.just(botCommand.handlerStart(String.join(" ", args))));
-                }))
+                    return newUser;
+                }).flatMap(user -> userService.save(user)
+                    .then(Mono.just(botCommand.handlerStart(String.join(" ", args))))
+                ))
                 .flatMap(response -> sendResponseAsync(chatId, response))
                 .then();
         }
@@ -262,13 +262,13 @@ public class TelegramBotService extends TelegramLongPollingBot {
      */
     public Mono<Void> sendResponseAsync(String chatId, String text) {
         String maskedChatId = ChatIdMasker.maskChatId(chatId);
-        logger.info("Sending response to user: {}", maskedChatId);
+        logger.info("[SEND] Sending response to user: {} | text: {}", maskedChatId, text);
         return Mono.fromRunnable(() -> {
             try {
                 kafkaProducer.sendOutgoingMessageAsync(chatId, text);
-                logger.info("Message sent to Kafka successfully for user: {}", maskedChatId);
+                logger.info("[SEND] Message sent to Kafka successfully for user: {}", maskedChatId);
             } catch (Exception e) {
-                logger.error("Error sending message to Kafka for user {}: {}", maskedChatId, e.getMessage());
+                logger.error("[SEND] Error sending message to Kafka for user {}: {}", maskedChatId, e.getMessage(), e);
             }
         });
     }
@@ -306,15 +306,23 @@ public class TelegramBotService extends TelegramLongPollingBot {
                         return parseAndProcessCommand(text, chatId)
                             .then(Mono.just("Обработана команда /start"));
                     })
-                    .switchIfEmpty(Mono.defer(() -> {
-                        // Если пользователь не найден (редкий случай - должен был быть создан в onUpdateReceived)
-                        logger.info("User not found in Kafka processor, creating new: {}", maskedChatId);
+                    .switchIfEmpty(Mono.fromCallable(() -> {
+                        logger.info("[START] User not found in Kafka processor, creating new: {}", maskedChatId);
                         User newUser = new User(null, chatId);
                         newUser.setHasStarted(true);
-                        return userService.save(newUser)
-                            .then(parseAndProcessCommand(text, chatId))
-                            .then(Mono.just("Обработана команда /start - создан новый пользователь"));
-                    }));
+                        return newUser;
+                    }).flatMap(newUser -> userService.save(newUser)
+                        .doOnSuccess(u -> log.info("[START] New user saved successfully: {}", maskedChatId))
+                        .doOnError(e -> log.error("[START] Error saving new user: {}: {}", maskedChatId, e.getMessage(), e))
+                        .flatMap(u -> parseAndProcessCommand(text, chatId)
+                            .doOnSuccess(v -> log.info("[START] parseAndProcessCommand completed for new user: {}", maskedChatId))
+                            .doOnError(e -> log.error("[START] Error in parseAndProcessCommand for new user: {}: {}", maskedChatId, e.getMessage(), e))
+                            .thenReturn("Обработана команда /start - создан новый пользователь")
+                        )
+                        .doOnSuccess(msg -> log.info("[START] Success message for new user: {}: {}", maskedChatId, msg))
+                        .doOnError(e -> log.error("[START] Error after full new user flow: {}: {}", maskedChatId, e.getMessage(), e))
+                        .onErrorReturn("Ошибка при создании нового пользователя")
+                    ));
             }
             
             // Для других команд проверяем статус пользователя
@@ -334,10 +342,10 @@ public class TelegramBotService extends TelegramLongPollingBot {
                         .flatMap(response -> sendResponseAsync(chatId, response)
                             .then(Mono.just(response)));
                 })
-                .switchIfEmpty(Mono.defer(() -> 
+                .switchIfEmpty(
                     sendResponseAsync(chatId, "❌ Пожалуйста, начните работу с ботом командой /start")
-                        .then(Mono.just("❌ Пожалуйста, начните работу с ботом командой /start"))
-                ));
+                        .thenReturn("❌ Пожалуйста, начните работу с ботом командой /start")
+                );
         } catch (Exception e) {
             logger.error("Error processing Kafka message: {}", e.getMessage());
             return Mono.just("Произошла ошибка при обработке сообщения.");

@@ -2,7 +2,7 @@ package spbstu.mcs.telegramBot.DB.repositories;
 
 import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.stereotype.Repository;
-import spbstu.mcs.telegramBot.DB.collections.Notification;
+import spbstu.mcs.telegramBot.model.Notification;
 import spbstu.mcs.telegramBot.model.Currency;
 
 import java.util.List;

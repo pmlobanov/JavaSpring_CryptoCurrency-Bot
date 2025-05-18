@@ -1,6 +1,5 @@
 package spbstu.mcs.telegramBot.security;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import javax.crypto.Cipher;
 import javax.crypto.spec.SecretKeySpec;
@@ -13,18 +12,18 @@ import java.security.NoSuchAlgorithmException;
 @Service
 @Slf4j
 public class EncryptionService {
-    private final String secretKey;
     private static final String ALGORITHM = "AES";
     private final SecretKeySpec keySpec;
 
-    public EncryptionService(@Value("${encryption.secret.key}") String secretKey) {
-        this.secretKey = secretKey;
+    public EncryptionService() {
+        // Используем фиксированный ключ для шифрования
+        String secretKey = "BitXBotSecretKey2024";
         this.keySpec = createKeySpec(secretKey);
     }
     
     /**
      * Создает ключ AES правильного размера из предоставленного секретного ключа
-     * @param key Исходный ключ из конфигурации
+     * @param key Исходный ключ
      * @return SecretKeySpec с правильной длиной для AES
      */
     private SecretKeySpec createKeySpec(String key) {

@@ -18,9 +18,9 @@ public class KafkaProducerService {
     private final String incomingTopic;
 
     public KafkaProducerService(
-            @Value("${kafka.bootstrap-servers:localhost:29092}") String bootstrapServers,
-            @Value("${kafka.topics.outgoing:telegram-outgoing-messages}") String outgoingTopic,
-            @Value("${kafka.topics.incoming:telegram-incoming-messages}") String incomingTopic) {
+            @Value("${kafka.bootstrap-servers}") String bootstrapServers,
+            @Value("${kafka.topics.outgoing}") String outgoingTopic,
+            @Value("${kafka.topics.incoming}") String incomingTopic) {
         this.outgoingTopic = outgoingTopic;
         this.incomingTopic = incomingTopic;
         
