@@ -5,6 +5,7 @@ Telegram-бот для отслеживания текущей цены для �
 
 ## Ссылки
 [![Docker Image](https://img.shields.io/badge/Docker%20Hub-mcherepnov/crypto--telegram--bot-blue?logo=docker)](https://hub.docker.com/repository/docker/mcherepnov/crypto-telegram-bot/general)
+
 [![Telegram](https://img.shields.io/badge/🤖_Telegram_Bot-@Crypto_Currency_BitX_bot-blue?logo=telegram)](https://t.me/Crypto_Currency_BitX_bot)
 ## Техноогичексий стек
 - Язык: **Java 23**
@@ -220,7 +221,7 @@ Telegram-бот для отслеживания текущей цены для �
   <img src="docs/images/diagrams/diagram_1.png" alt="Диаграмма модулей приложения" width="700">
 </p>
 
-**Полная документация**: [📚 Открыть документацию](https://github.com/ваш-логин/ваш-репозиторий/blob/ветка/путь/к/index.html)
+[📚 **Полная документация**](https://htmlpreview.github.io/?https://github.com/pmlobanov/JavaSpring_CryptoCurrencyBot/blob/main/docs/moduleDocs.html)
 
 ## Демонстрация работы бота:
 <div align="center">
