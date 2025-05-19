@@ -1,8 +1,8 @@
 db = db.getSiblingDB('BitBotDB');
 
 db.createUser({
-  user: "Robert_Polson",
-  pwd: "here123",
+  user: "appuser",
+  pwd: "apppassword",
   roles: [
     { role: "readWrite", db: "BitBotDB" },
     { role: "dbAdmin", db: "BitBotDB" }
