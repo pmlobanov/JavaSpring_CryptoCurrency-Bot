@@ -15,7 +15,6 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import spbstu.mcs.telegramBot.DB.services.UserService;
 import spbstu.mcs.telegramBot.model.User;
 import org.telegram.telegrambots.meta.api.objects.Chat;
-import spbstu.mcs.telegramBot.service.AdminAuthMiddleware;
 import org.springframework.beans.factory.annotation.Value;
 import spbstu.mcs.telegramBot.util.ChatIdMasker;
 
@@ -39,7 +38,7 @@ public class TelegramBotService extends TelegramLongPollingBot {
     private final BotCommand botCommand;
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
     private final UserService userService;
-    private final AdminAuthMiddleware adminAuthMiddleware;
+    private final String maskedChatId;
 
     @Autowired
     public TelegramBotService(
@@ -47,8 +46,7 @@ public class TelegramBotService extends TelegramLongPollingBot {
             @Value("${telegram.bot.username}") String botUsername, 
             KafkaProducerService kafkaProducer,
             @Lazy BotCommand botCommand,
-            UserService userService,
-            AdminAuthMiddleware adminAuthMiddleware) {
+            UserService userService) {
         super(botToken);
         logger.info("Initializing TelegramBotService with username: {}", botUsername);
         try {
@@ -57,7 +55,7 @@ public class TelegramBotService extends TelegramLongPollingBot {
             this.kafkaProducer = kafkaProducer;
             this.botCommand = botCommand;
             this.userService = userService;
-            this.adminAuthMiddleware = adminAuthMiddleware;
+            this.maskedChatId = ChatIdMasker.maskChatId(botUsername);
             logger.info("TelegramBotService initialized successfully");
         } catch (Exception e) {
             logger.error("Failed to initialize TelegramBotService: {}", e.getMessage(), e);
@@ -108,7 +106,7 @@ public class TelegramBotService extends TelegramLongPollingBot {
                     })
                     .switchIfEmpty(Mono.fromCallable(() -> {
                         log.info("User does not exist, creating new user with hasStarted=true for chatId: {}", maskedChatId);
-                        User newUser = new User(null, chatId);
+                        User newUser = new User(chatId);
                         newUser.setHasStarted(true);
                         return newUser;
                     }).flatMap(userService::save))
@@ -133,7 +131,7 @@ public class TelegramBotService extends TelegramLongPollingBot {
             
             // Для всех остальных команд - стандартный поток обработки
             userService.getUserByChatId(chatId)
-                .defaultIfEmpty(new User(null, chatId)) // Если пользователя нет, создаем нового
+                .defaultIfEmpty(new User(chatId)) // Если пользователя нет, создаем нового
                 .flatMap(user -> {
                     // Для других команд проверяем активность
                     if (isCommand && !user.isHasStarted()) {
@@ -170,11 +168,10 @@ public class TelegramBotService extends TelegramLongPollingBot {
                                     
                                     log.warn("Processing message locally due to Kafka error: {} from user: {}", cmd, maskedChatId);
                                     
-                                    String authHeader = update.getMessage().getCaption();
-                                    adminAuthMiddleware.checkUserAuthorization(cmd, chatId, authHeader)
+                                    userService.checkUserAuthorization(cmd, chatId)
                                         .flatMap(isAuthorized -> {
                                             if (!isAuthorized) {
-                                                return sendResponseAsync(chatId, adminAuthMiddleware.getAuthorizationErrorMessage(cmd));
+                                                return sendResponseAsync(chatId, userService.getAuthorizationErrorMessage(cmd));
                                             }
                                             return botCommand.processCommand(cmd, cmdArgs, chatId);
                                         })
@@ -238,7 +235,7 @@ public class TelegramBotService extends TelegramLongPollingBot {
                 })
                 .switchIfEmpty(Mono.fromCallable(() -> {
                     log.info("Creating new user in processCommand for chatId: {}", chatId);
-                    User newUser = new User(null, chatId);
+                    User newUser = new User(chatId);
                     newUser.setHasStarted(true);
                     return newUser;
                 }).flatMap(user -> userService.save(user)
@@ -308,7 +305,7 @@ public class TelegramBotService extends TelegramLongPollingBot {
                     })
                     .switchIfEmpty(Mono.fromCallable(() -> {
                         logger.info("[START] User not found in Kafka processor, creating new: {}", maskedChatId);
-                        User newUser = new User(null, chatId);
+                        User newUser = new User(chatId);
                         newUser.setHasStarted(true);
                         return newUser;
                     }).flatMap(newUser -> userService.save(newUser)

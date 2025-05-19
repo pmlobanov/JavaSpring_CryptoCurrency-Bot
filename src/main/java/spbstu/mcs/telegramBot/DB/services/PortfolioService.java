@@ -69,8 +69,7 @@ public class PortfolioService {
             .flatMap(user -> {
                 Portfolio portfolio = new Portfolio(chatId);
                 Portfolio savedPortfolio = portfolioRepository.save(portfolio);
-                // Добавляем portfolioId пользователю и обновляем userTgName
-                return userService.addPortfolioToUser(chatId, savedPortfolio.getId(), user.getUserTgName())
+                return userService.addPortfolioToUser(chatId, savedPortfolio.getId())
                     .thenReturn(savedPortfolio);
             });
     }
@@ -110,14 +109,6 @@ public class PortfolioService {
     public void deletePortfolio(String portfolioId) {
         Portfolio portfolio = getPortfolio(portfolioId);
         portfolioRepository.delete(portfolio);
-    }
-
-    public List<Portfolio> getUserPortfolios(String userTgName) {
-        User user = userRepository.findByUserTgName(userTgName);
-        if (user == null) {
-            throw new RuntimeException("User not found");
-        }
-        return portfolioRepository.findAllById(user.getPortfolioIds());
     }
 
     public Portfolio addCryptoToPortfolio(String portfolioId, Currency.Crypto crypto, BigDecimal amount) {

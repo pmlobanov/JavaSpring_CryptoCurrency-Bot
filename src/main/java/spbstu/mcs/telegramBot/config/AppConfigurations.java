@@ -4,9 +4,14 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.context.annotation.ComponentScan;
+import org.springframework.context.annotation.FilterType;
+import org.springframework.context.annotation.PropertySource;
+import org.springframework.context.support.PropertySourcesPlaceholderConfigurer;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.Resource;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.reactive.function.server.*;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.telegram.telegrambots.meta.TelegramBotsApi;
 import org.telegram.telegrambots.updatesreceivers.DefaultBotSession;
@@ -23,36 +28,42 @@ import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoCollection;
-import com.mongodb.client.MongoDatabase;
 import org.bson.Document;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
-import reactor.core.publisher.Mono;
-
 import java.util.Map;
 import java.util.HashMap;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
-import spbstu.mcs.telegramBot.controller.AdminController;
-import spbstu.mcs.telegramBot.service.AdminAuthMiddleware;
-import spbstu.mcs.telegramBot.DB.services.AdminService;
-import spbstu.mcs.telegramBot.DB.services.UserService;
-import spbstu.mcs.telegramBot.cryptoApi.*;
 import spbstu.mcs.telegramBot.service.TelegramBotService;
 import spbstu.mcs.telegramBot.DB.services.NotificationService;
-import spbstu.mcs.telegramBot.DB.repositories.NotificationRepository;
 import spbstu.mcs.telegramBot.service.AlertsHandling;
-import spbstu.mcs.telegramBot.DB.repositories.AdminRepository;
 import spbstu.mcs.telegramBot.security.EncryptionService;
-
-import java.time.LocalDateTime;
+import org.springframework.web.reactive.function.server.RouterFunction;
+import org.springframework.web.reactive.function.server.RequestPredicates;
+import org.springframework.web.reactive.function.server.RouterFunctions;
+import org.springframework.web.reactive.function.server.ServerResponse;
+import spbstu.mcs.telegramBot.server.ServerApp;
+import spbstu.mcs.telegramBot.DB.services.AdminService;
+import spbstu.mcs.telegramBot.DB.services.UserService;
+import spbstu.mcs.telegramBot.DB.services.ApiKeyService;
+import spbstu.mcs.telegramBot.cryptoApi.PriceFetcher;
+import spbstu.mcs.telegramBot.cryptoApi.CurrencyConverter;
+import spbstu.mcs.telegramBot.cryptoApi.CryptoInformation;
 
 /**
  * Unified configuration file that organizes multiple configurations into logical sections.
- * This reduces the number of configuration files in the codebase by grouping them by functionality.
+ * This is the main configuration class for the application.
  */
 @Configuration
+@ComponentScan(
+    basePackages = "spbstu.mcs.telegramBot",
+    excludeFilters = {
+        @ComponentScan.Filter(type = FilterType.REGEX, pattern = "spbstu.mcs.telegramBot.security.SecurityConfig")
+    }
+)
+@PropertySource("classpath:application.properties")
 @EnableMongoRepositories(basePackages = "spbstu.mcs.telegramBot.DB.repositories")
 @Slf4j
 public class AppConfigurations {
@@ -60,11 +71,23 @@ public class AppConfigurations {
     @Autowired
     private VaultConfig vaultConfig;
 
+    /**
+     * Enables @Value annotations for resolving placeholders in Spring configuration classes
+     */
+    @Bean
+    public static PropertySourcesPlaceholderConfigurer propertySourcesPlaceholderConfigurer() {
+        PropertySourcesPlaceholderConfigurer configurer = new PropertySourcesPlaceholderConfigurer();
+        configurer.setIgnoreUnresolvablePlaceholders(true);
+        
+        // Explicitly set the properties resource
+        Resource resource = new ClassPathResource("application.properties");
+        configurer.setLocation(resource);
+        return configurer;
+    }
+
     @Bean
     public MongoClient mongoClient() {
         String mongoUri = vaultConfig.getSecret("secret/data/crypto-bot", "mongodb.connection-string");
-        log.info("MongoDB connection string for internal use: {}", mongoUri);
-        log.info("MongoDB connection string for external access (MongoDB Compass): mongodb://root:example@localhost:27017/BitBotDB?authSource=admin");
         return MongoClients.create(mongoUri);
     }
 
@@ -88,7 +111,7 @@ public class AppConfigurations {
      * Web configuration section including server properties and routing
      */
     @Configuration
-    public class WebConfiguration {
+    public static class WebConfiguration {
         
         @Value("${server.host}")
         private String serverHost;
@@ -130,19 +153,33 @@ public class AppConfigurations {
             return new ServerProperties(serverHost, serverPort);
         }
 
+        @Bean
+        public RouterFunction<ServerResponse> routerFunction() {
+            return RouterFunctions.route(RequestPredicates.GET("/healthcheck"),
+                request -> ServerResponse.ok().bodyValue("Server is running"));
+        }
+
         /**
-         * Creates a router function for handling HTTP endpoints
+         * Creates ServerApp bean for handling HTTP requests
          */
         @Bean
-        public RouterFunction<ServerResponse> routerFunction(AdminController adminController) {
-            return RouterFunctions
-                .route()
-                // Health check endpoint
-                .GET("/healthcheck", request -> 
-                    ServerResponse.ok().bodyValue(Map.of("status", "Server is running", "version", "1.0.0")))
-                // Admin routes
-                .GET("/api/admin/users", adminController::getUsers)
-                .build();
+        public ServerApp serverApp(
+                ServerProperties serverProperties,
+                RouterFunction<ServerResponse> routes,
+                AdminService adminService,
+                UserService userService,
+                EncryptionService encryptionService,
+                ApiKeyService apiKeyService,
+                PriceFetcher priceFetcher,
+                @Value("${logging.file.path}") String logFilePath,
+                @Value("${spring.kafka.bootstrap-servers}") String kafkaBootstrapServers,
+                @Value("${spring.kafka.topics.incoming}") String kafkaIncomingTopic,
+                @Value("${spring.kafka.topics.outgoing}") String kafkaOutgoingTopic) {
+            return new ServerApp(
+                serverProperties, routes, adminService, userService,
+                encryptionService, apiKeyService, priceFetcher,
+                logFilePath, kafkaBootstrapServers, kafkaIncomingTopic, kafkaOutgoingTopic
+            );
         }
     }
     
@@ -266,10 +303,6 @@ public class AppConfigurations {
         
         @Autowired
         private AdminService adminService;
-        
-        @Autowired
-        @Lazy
-        private AdminAuthMiddleware adminAuthMiddleware;
         
         @Autowired
         private EncryptionService encryptionService;

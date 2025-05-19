@@ -38,21 +38,17 @@ public class User {
     @Id
     private String id;
 
-    @Field("userTgName")
-    private String userTgName;
-
-    @Indexed(unique = true)
     @Field("chatId")
     private String chatId;
+
+    @Field("hasStarted")
+    private boolean hasStarted;
 
     @Field("portfolioIds")
     private List<String> portfolioIds;
 
     @Field("notificationIds")
     private List<String> notificationIds;
-
-    @Field("hasStarted")
-    private boolean hasStarted;
 
     /**
      * Конструктор без параметров для Spring Data MongoDB
@@ -64,29 +60,21 @@ public class User {
     }
 
     /**
-     * Создает нового пользователя с указанными параметрами.
-     *
-     * @param userTgName имя пользователя в Telegram
-     * @param chatId ID чата пользователя в Telegram
+     * Создает нового пользователя
+     * @param chatId идентификатор чата пользователя
      */
-    public User(String userTgName, String chatId) {
-        this.userTgName = userTgName;
+    public User(String chatId) {
+        this();
         this.chatId = chatId;
-        this.portfolioIds = new ArrayList<>();
-        this.notificationIds = new ArrayList<>();
-        this.hasStarted = false;
     }
 
     /**
-     * Создает нового пользователя с указанными параметрами.
-     *
-     * @param userTgName имя пользователя в Telegram
-     * @param chatId ID чата пользователя в Telegram
+     * Создает нового пользователя с указанными портфелями и уведомлениями
+     * @param chatId идентификатор чата пользователя
      * @param portfolioIds список идентификаторов портфелей
      * @param notificationIds список идентификаторов уведомлений
      */
-    public User(String userTgName, String chatId, List<String> portfolioIds, List<String> notificationIds) {
-        this.userTgName = userTgName;
+    public User(String chatId, List<String> portfolioIds, List<String> notificationIds) {
         this.chatId = chatId;
         this.portfolioIds = portfolioIds != null ? portfolioIds : new ArrayList<>();
         this.notificationIds = notificationIds != null ? notificationIds : new ArrayList<>();
@@ -115,6 +103,14 @@ public class User {
      */
     public String getId() {
         return id;
+    }
+
+    /**
+     * Устанавливает уникальный идентификатор пользователя.
+     * @param id новый ID пользователя
+     */
+    public void setId(String id) {
+        this.id = id;
     }
 
     /**
@@ -170,14 +166,6 @@ public class User {
     // Сеттеры
 
     /**
-     * Устанавливает имя пользователя в Telegram.
-     * @param userTgName новое имя пользователя
-     */
-    public void setUserTgName(String userTgName) {
-        this.userTgName = userTgName;
-    }
-
-    /**
      * Устанавливает ID чата пользователя в Telegram.
      * @param chatId новое ID чата пользователя
      */
@@ -194,14 +182,6 @@ public class User {
     }
 
     /**
-     * Возвращает имя пользователя в Telegram.
-     * @return имя пользователя в Telegram
-     */
-    public String getUserTgName() {
-        return userTgName;
-    }
-
-    /**
      * Возвращает строковое представление пользователя.
      * @return строковое описание со всеми полями
      */
@@ -209,8 +189,8 @@ public class User {
     public String toString() {
         return "User{" +
                 "id='" + id + '\'' +
-                ", userTgName='" + userTgName + '\'' +
                 ", chatId='" + chatId + '\'' +
+                ", hasStarted=" + hasStarted +
                 ", portfolioIds=" + portfolioIds +
                 ", notificationIds=" + notificationIds +
                 '}';

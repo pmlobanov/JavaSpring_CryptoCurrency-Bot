@@ -22,11 +22,11 @@ import java.util.Optional;
  * <p>Примеры использования:</p>
  * <pre>{@code
  * // Создание и сохранение нового пользователя
- * User user = new User("john_doe", FiatCurrency.USD, CryptoCurrency.BTC);
+ * User user = new User("123456789");
  * userRepository.save(user);
  *
- * // Поиск пользователя по Telegram имени
- * User foundUser = userRepository.findByUserTgName("john_doe");
+ * // Поиск пользователя по ID чата
+ * User foundUser = userRepository.findByChatId("123456789");
  * }</pre>
  *
  * @see MongoRepository
@@ -35,15 +35,6 @@ import java.util.Optional;
 
 @Repository
 public interface UserRepository extends MongoRepository<User, String> {
-
-    /**
-     * Находит пользователя по его Telegram имени.
-     * Поиск выполняется с учетом регистра символов.
-     *
-     * @param userTgName Telegram имя пользователя для поиска
-     * @return найденный пользователь или {@code null}, если пользователь не существует
-     */
-    User findByUserTgName(String userTgName);
 
     /**
      * Находит пользователя по идентификатору чата.

@@ -103,58 +103,6 @@ public class NotificationService {
             .switchIfEmpty(Mono.error(new NoSuchElementException("Notification not found with id: " + id)));
     }
 
-//    public Mono<Boolean> checkAlert(Notification notification) {
-//        Currency.Crypto crypto = notification.getCryptoCurrency();
-//        return priceFetcher.getCurrentPrice(crypto)
-//                .map(priceJson -> {
-//                    try {
-//                        BigDecimal currentPrice = new BigDecimal(priceJson);
-//                        Double threshold = notification.getActiveThreshold();
-//
-//                        switch (notification.getThresholdType()) {
-//                            case VALUE:
-//                                return currentPrice.compareTo(BigDecimal.valueOf(threshold)) > 0;
-//                            case PERCENT:
-//                                BigDecimal percentageChange = BigDecimal.valueOf(threshold);
-//                                BigDecimal currentPercentage = currentPrice
-//                                    .multiply(new BigDecimal("100"))
-//                                    .divide(BigDecimal.valueOf(threshold), 4, BigDecimal.ROUND_HALF_UP);
-//                                return currentPercentage.compareTo(percentageChange) > 0;
-//                            case EMA:
-//                                return currentPrice.compareTo(BigDecimal.valueOf(threshold)) > 0;
-//                            default:
-//                                return false;
-//                        }
-//                    } catch (Exception e) {
-//                        return false;
-//                    }
-//                });
-//    }
-
-    public Mono<Boolean> checkAlert(Notification notification, BigDecimal currentPrice, BigDecimal startPrice) {
-        return Mono.just(notification)
-            .map(n -> {
-                Double threshold = n.getActiveThreshold();
-                switch (n.getThresholdType()) {
-                    case VALUE:
-                        return currentPrice.compareTo(BigDecimal.valueOf(threshold)) > 0;
-                    case PERCENT:
-                        if (startPrice != null) {
-                            BigDecimal percentageChange = BigDecimal.valueOf(threshold);
-                            BigDecimal currentPercentage = currentPrice.subtract(startPrice)
-                                .divide(startPrice, 4, BigDecimal.ROUND_HALF_UP)
-                                .multiply(new BigDecimal("100"));
-                            return currentPercentage.compareTo(percentageChange) > 0;
-                        }
-                        return false;
-                    case EMA:
-                        return currentPrice.compareTo(BigDecimal.valueOf(threshold)) > 0;
-                    default:
-                        return false;
-                }
-            });
-    }
-
     public Mono<Void> addNotificationToUser(String chatId, String notificationId) {
         return Mono.fromRunnable(() -> {
             Optional<User> userOpt = userRepository.findOptionalByChatId(chatId);

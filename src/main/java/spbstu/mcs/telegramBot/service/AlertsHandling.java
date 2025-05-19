@@ -53,7 +53,6 @@ public class AlertsHandling {
                           PriceFetcher priceFetcher,
                           TelegramBotService telegramBotService,
                           NotificationService notificationService,
-                     //     NotificationRepository notificationRepository,
                           UserService userService) {
         log.info("Инициализация сервиса AlertsHandling...");
         this.objectMapper = objectMapper;
@@ -61,7 +60,6 @@ public class AlertsHandling {
         this.priceFetcher = priceFetcher;
         this.telegramBotService = telegramBotService;
         this.notificationService = notificationService;
-      //  this.notificationRepository = notificationRepository;
         this.userService = userService;
         log.info("Сервис AlertsHandling успешно инициализирован");
     }

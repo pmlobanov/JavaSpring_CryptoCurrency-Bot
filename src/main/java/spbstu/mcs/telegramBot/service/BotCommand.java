@@ -962,10 +962,11 @@ public class BotCommand {
                     log.info("User has started, processing command: {}", command);
                     return processCommandInternal(command, args, chatId);
                 })
-                .switchIfEmpty(Mono.defer(() -> {
-                    log.info("User has started (empty check), processing command: {}", command);
-                    return processCommandInternal(command, args, chatId);
-                }));
+                .switchIfEmpty(Mono.just(command)
+                    .flatMap(cmd -> {
+                        log.info("User has started (empty check), processing command: {}", cmd);
+                        return processCommandInternal(cmd, args, chatId);
+                    }));
         }
         log.info("Processing /start command");
         return processCommandInternal(command, args, chatId);
@@ -1001,15 +1002,16 @@ public class BotCommand {
                             return telegramBotService.sendResponseAsync(chatId, handlerStart(argsStr));
                         }
                     })
-                    .switchIfEmpty(Mono.defer(() -> {
-                        log.info("Creating brand new user with chatId: {}", chatId);
-                        User newUser = new User(null, chatId);
-                        newUser.setHasStarted(true);
-                        return userService.save(newUser)
-                            .doOnSuccess(u -> log.info("Successfully created new user with hasStarted=true"))
-                            .doOnError(e -> log.error("Error creating new user: {}", e.getMessage()))
-                            .then(telegramBotService.sendResponseAsync(chatId, handlerStart(argsStr)));
-                    }));
+                    .switchIfEmpty(Mono.just(chatId)
+                        .flatMap(id -> {
+                            log.info("Creating brand new user with chatId: {}", id);
+                            User newUser = new User(id);
+                            newUser.setHasStarted(true);
+                            return userService.save(newUser)
+                                .doOnSuccess(u -> log.info("Successfully created new user with hasStarted=true"))
+                                .doOnError(e -> log.error("Error creating new user: {}", e.getMessage()))
+                                .then(telegramBotService.sendResponseAsync(id, handlerStart(argsStr)));
+                        }));
             }
             case "/help" -> telegramBotService.sendResponseAsync(chatId, handlerHelp(argsStr));
             case "/set_crypto" -> telegramBotService.sendResponseAsync(chatId, handlerSetCrypto(argsStr));
@@ -1049,12 +1051,6 @@ public class BotCommand {
             case "/delete_all_assets" -> handlerDeleteAllAssets(argsStr, chatId)
                 .flatMap(response -> telegramBotService.sendResponseAsync(chatId, response));
             case "/authors" -> handlerAuthors(argsStr)
-                .flatMap(response -> telegramBotService.sendResponseAsync(chatId, response));
-            case "/admin_create" -> handlerAdminCreate(args, chatId)
-                .flatMap(response -> telegramBotService.sendResponseAsync(chatId, response));
-            case "/admin_refresh_key" -> handlerAdminRefreshKey(args, chatId)
-                .flatMap(response -> telegramBotService.sendResponseAsync(chatId, response));
-            case "/admin_deactivate" -> handlerAdminDeactivate(args, chatId)
                 .flatMap(response -> telegramBotService.sendResponseAsync(chatId, response));
             default -> telegramBotService.sendResponseAsync(chatId, 
                 "❌ Неизвестная команда. Используйте /help для просмотра доступных команд.");
@@ -1437,58 +1433,5 @@ public class BotCommand {
             return Mono.just("❌ Команда /get_assets_price не принимает аргументов");
         }
         return cryptoPortfolioManager.getAssetsPrice(chatId);
-    }
-
-    /**
-     * Обрабатывает команду /admin_create
-     * Создает нового администратора
-     */
-    public Mono<String> handlerAdminCreate(String[] args, String chatId) {
-        if (args.length != 1) {
-            return Mono.just("❌ Неверный формат команды!\n" +
-                           "Используйте: /admin_create <username>");
-        }
-
-        String username = args[0];
-        return adminService.createAdmin(username)
-            .map(admin -> "✅ Администратор " + username + " успешно создан.\n" +
-                         "API ключ будет отправлен в личном сообщении.")
-            .onErrorResume(e -> Mono.just("❌ Ошибка при создании администратора: " + e.getMessage()));
-    }
-
-    /**
-     * Обрабатывает команду /admin_refresh_key
-     * Обновляет API ключ администратора
-     */
-    public Mono<String> handlerAdminRefreshKey(String[] args, String chatId) {
-        if (args.length != 1) {
-            return Mono.just("❌ Неверный формат команды!\n" +
-                           "Используйте: /admin_refresh_key <username>");
-        }
-
-        String username = args[0];
-        return adminService.refreshApiKey(username)
-            .map(admin -> "✅ API ключ для администратора " + username + " успешно обновлен.\n" +
-                         "Новый ключ будет отправлен в личном сообщении.")
-            .switchIfEmpty(Mono.just("❌ Администратор не найден: " + username))
-            .onErrorResume(e -> Mono.just("❌ Ошибка при обновлении API ключа: " + e.getMessage()));
-    }
-
-    /**
-     * Обрабатывает команду /admin_deactivate
-     * Деактивирует администратора
-     */
-    public Mono<String> handlerAdminDeactivate(String[] args, String chatId) {
-        if (args.length != 1) {
-            return Mono.just("❌ Неверный формат команды!\n" +
-                           "Используйте: /admin_deactivate <username>");
-        }
-
-        String username = args[0];
-        return adminService.deactivateAdmin(username)
-            .map(success -> success ? 
-                "✅ Администратор " + username + " успешно деактивирован." :
-                "❌ Администратор не найден: " + username)
-            .onErrorResume(e -> Mono.just("❌ Ошибка при деактивации администратора: " + e.getMessage()));
     }
 }

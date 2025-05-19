@@ -60,68 +60,31 @@ public class AdminService {
 
     public Mono<Admin> validateApiKey(String apiKey) {
         return Mono.fromCallable(() -> {
-            // Don't filter by isActive, check all admins and validate by expiration date
             List<Admin> admins = adminRepository.findAll();
-                
             log.info("Validating API key: {}", apiKey);
             log.info("Found {} admins to check against", admins.size());
             
-            // For direct database query approach
             String encryptedInputKey = encryptionService.encrypt(apiKey);
             log.info("Encrypted input key for comparison: {}", encryptedInputKey.substring(0, 10) + "...");
             
-            // Try direct database query first (faster)
             Optional<Admin> adminByEncryptedKey = admins.stream()
                 .filter(a -> a.getEncryptedApiKey().equals(encryptedInputKey))
                 .findFirst();
                 
             if (adminByEncryptedKey.isPresent()) {
                 Admin admin = adminByEncryptedKey.get();
-                log.info("Found admin by direct encrypted key comparison: {}", admin.getUsername());
+                log.info("Found admin by encrypted key comparison: {}", admin.getUsername());
                 
                 // Check if key is expired
                 LocalDateTime now = LocalDateTime.now();
                 if (admin.getApiKeyExpiry() != null && now.isAfter(admin.getApiKeyExpiry())) {
                     log.warn("API key expired for admin: {}", admin.getUsername());
-                    // Временно сохраняем открытый ключ для возврата
-                    admin.setEncryptedApiKey(apiKey);
-                    return admin;
+                    return null;
                 }
                 
                 return admin;
             }
-                
-            // If direct comparison fails, try decryption approach
-            for (Admin admin : admins) {
-                try {
-                    String storedEncryptedKey = admin.getEncryptedApiKey();
-                    log.info("Admin: {}, Stored encrypted key: {}", admin.getUsername(), 
-                        storedEncryptedKey.substring(0, Math.min(10, storedEncryptedKey.length())) + "...");
-                    
-                    // Try to decrypt the stored key and compare with input
-                    String decryptedStoredKey = encryptionService.decrypt(storedEncryptedKey);
-                    log.info("Decrypted stored key for admin {}: {}", admin.getUsername(), 
-                        decryptedStoredKey);
-                    
-                    // Compare the input key with the decrypted stored key
-                    if (apiKey.equals(decryptedStoredKey)) {
-                        log.info("API key match found for admin: {}", admin.getUsername());
-                        
-                        // Check if key is expired by date
-                        LocalDateTime now = LocalDateTime.now();
-                        if (admin.getApiKeyExpiry() != null && now.isAfter(admin.getApiKeyExpiry())) {
-                            log.warn("API key expired for admin: {}", admin.getUsername());
-                            // Временно сохраняем открытый ключ для возврата
-                            admin.setEncryptedApiKey(apiKey);
-                            return admin;
-                        }
-                        
-                        return admin;
-                    }
-                } catch (Exception e) {
-                    log.error("Error processing API key for admin {}: {}", admin.getUsername(), e.getMessage());
-                }
-            }
+            
             log.warn("No matching API key found among {} admins", admins.size());
             return null;
         })
@@ -129,7 +92,13 @@ public class AdminService {
         .doOnError(error -> log.error("Error validating API key: {}", error.getMessage()));
     }
 
-    public Mono<Admin> refreshApiKey(String username) {
+    /**
+     * Обновляет API ключ администратора с указанной датой истечения срока действия
+     * @param username имя пользователя администратора
+     * @param expiryDate дата истечения срока действия
+     * @return Mono с обновленным администратором
+     */
+    public Mono<Admin> updateApiKey(String username, LocalDateTime expiryDate) {
         return Mono.fromCallable(() -> {
             Optional<Admin> optAdmin = adminRepository.findByUsername(username);
             if (optAdmin.isEmpty()) {
@@ -142,30 +111,21 @@ public class AdminService {
             String encryptedApiKey = encryptionService.encrypt(newApiKey);
             
             admin.setEncryptedApiKey(encryptedApiKey);
-            admin.setApiKeyExpiry(LocalDateTime.now().plusDays(30));
-            admin.setUpdatedAt(LocalDateTime.now());
+            admin.setApiKeyExpiry(expiryDate);
             
             admin = adminRepository.save(admin);
             
-            log.info("Refreshed API key for admin: {}", username);
+            log.info("Updated API key for admin: {} with expiry date: {}", username, expiryDate);
             
             // Временно сохраняем открытый ключ для возврата
             admin.setEncryptedApiKey(newApiKey);
             return admin;
         })
-        .doOnError(error -> log.error("Error refreshing API key: {}", error.getMessage()));
+        .doOnError(error -> log.error("Error updating API key: {}", error.getMessage()));
     }
 
-    public Mono<Boolean> deactivateAdmin(String username) {
-        return Mono.fromCallable(() -> {
-            Optional<Admin> optAdmin = adminRepository.findByUsername(username);
-            if (optAdmin.isEmpty()) {
-                return false;
-            }
-            log.info("Deactivated admin: {} (no isActive field, only date-based expiration)", username);
-            return true;
-        })
-        .doOnError(error -> log.error("Error deactivating admin: {}", error.getMessage()));
+    public Mono<Admin> refreshApiKey(String username) {
+        return updateApiKey(username, LocalDateTime.now().plusDays(30));
     }
 
     /**

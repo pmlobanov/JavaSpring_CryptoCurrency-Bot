@@ -12,14 +12,9 @@ public class Admin {
     private String encryptedApiKey;
     private LocalDateTime apiKeyExpiry;
     private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
-
-    // Fields for new API key system - renamed from encryptedKey to use existing encryptedApiKey
-    private LocalDateTime keyExpirationDate;
 
     public Admin() {
         this.createdAt = LocalDateTime.now();
-        this.updatedAt = LocalDateTime.now();
     }
 
     public Admin(String username, String encryptedApiKey) {
@@ -67,22 +62,5 @@ public class Admin {
 
     public void setCreatedAt(LocalDateTime createdAt) {
         this.createdAt = createdAt;
-    }
-
-    public LocalDateTime getUpdatedAt() {
-        return updatedAt;
-    }
-
-    public void setUpdatedAt(LocalDateTime updatedAt) {
-        this.updatedAt = updatedAt;
-    }
-
-    // New API key system getters and setters - removing separate encryptedKey methods as we'll use encryptedApiKey
-    public LocalDateTime getKeyExpirationDate() {
-        return keyExpirationDate;
-    }
-
-    public void setKeyExpirationDate(LocalDateTime keyExpirationDate) {
-        this.keyExpirationDate = keyExpirationDate;
     }
 } 

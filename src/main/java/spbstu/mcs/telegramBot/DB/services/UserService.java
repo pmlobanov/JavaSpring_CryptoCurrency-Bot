@@ -4,6 +4,8 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Updates;
 import org.bson.Document;
+import org.bson.conversions.Bson;
+import org.bson.types.ObjectId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,6 +19,8 @@ import spbstu.mcs.telegramBot.model.Notification;
 import spbstu.mcs.telegramBot.model.Portfolio;
 import spbstu.mcs.telegramBot.model.User;
 import spbstu.mcs.telegramBot.util.ChatIdMasker;
+import spbstu.mcs.telegramBot.DB.repositories.UserRepository;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -35,18 +39,22 @@ import java.util.stream.Collectors;
  * </ul>
  */
 @Service
+@Slf4j
 public class UserService {
-    private static final Logger log = LoggerFactory.getLogger(UserService.class);
     private final MongoTemplate mongoTemplate;
     private final MongoCollection<Document> userCollection;
     private PortfolioService portfolioService;
     private NotificationService notificationService;
+    private final UserRepository userRepository;
+    private static final Set<String> PUBLIC_COMMANDS = new HashSet<>(Arrays.asList("/start", "/help"));
 
     @Autowired
     public UserService(MongoTemplate mongoTemplate, 
-                      MongoCollection<Document> userCollection) {
+                      MongoCollection<Document> userCollection,
+                      UserRepository userRepository) {
         this.mongoTemplate = mongoTemplate;
         this.userCollection = userCollection;
+        this.userRepository = userRepository;
         log.info("UserService initialized with MongoDB connection");
     }
     
@@ -68,53 +76,45 @@ public class UserService {
     }
 
     /**
-     * Создает нового пользователя с указанными параметрами.
-     *
-     * @param userTgName имя пользователя в Telegram
-     * @param chatId ID чата пользователя в Telegram
-     * @return созданный пользователь
+     * Создает нового пользователя
+     * @param chatId идентификатор чата пользователя
+     * @return Mono с созданным пользователем
      */
-    public Mono<User> createUser(String userTgName, String chatId) {
+    public Mono<User> createUser(String chatId) {
         String maskedChatId = maskChatId(chatId);
-        log.info("Creating new user with userTgName: {} and chatId: {}", userTgName, maskedChatId);
+        log.info("Creating new user with chatId: {}", maskedChatId);
         
         return Mono.fromCallable(() -> {
-            User user = new User(userTgName, chatId);
+            User user = new User(chatId);
             Document doc = userToDocument(user);
-            userCollection.insertOne(doc);
-            log.info("Successfully created user with chatId: {}", maskedChatId);
+            return userCollection.insertOne(doc);
+        })
+        .map(result -> {
+            User user = new User(chatId);
+            user.setId(result.getInsertedId().asObjectId().getValue().toString());
             return user;
-        }).onErrorResume(e -> {
-            log.error("Error creating user with chatId {}: {}", maskedChatId, e.getMessage());
-            return Mono.error(new RuntimeException("Failed to create user", e));
-        });
+        })
+        .doOnError(error -> log.error("Error creating user: {}", error.getMessage()));
     }
 
     /**
-     * Добавляет портфель к списку пользователя.
-     *
+     * Добавляет портфель пользователю
      * @param chatId идентификатор чата пользователя
-     * @param portfolioId идентификатор портфеля для добавления
-     * @param userTgName имя пользователя в Telegram (может быть null)
-     * @return Mono<Void> индикатор завершения операции
+     * @param portfolioId идентификатор портфеля
+     * @return Mono<Void>
      */
-    public Mono<Void> addPortfolioToUser(String chatId, String portfolioId, String userTgName) {
+    public Mono<Void> addPortfolioToUser(String chatId, String portfolioId) {
+        List<Bson> updates = new ArrayList<>();
+        updates.add(Updates.addToSet("portfolioIds", portfolioId));
+        
         return Mono.fromRunnable(() -> {
-            try {
-                List<org.bson.conversions.Bson> updates = new ArrayList<>();
-                updates.add(Updates.addToSet("portfolioIds", portfolioId));
-                if (userTgName != null) {
-                    updates.add(Updates.set("userTgName", userTgName));
-                }
-                userCollection.updateOne(
-                    Filters.eq("chatId", chatId),
-                    Updates.combine(updates)
-                );
-            } catch (Exception e) {
-                log.error("Error adding portfolio to user: {}", e.getMessage());
-                throw new NoSuchElementException("User not found or update failed");
-            }
-        });
+            userCollection.updateOne(
+                Filters.eq("chatId", chatId),
+                Updates.combine(updates)
+            );
+        })
+        .then()
+        .doOnError(error -> log.error("Error adding portfolio to user: {}", error.getMessage()));
     }
 
     /**
@@ -178,15 +178,14 @@ public class UserService {
     }
 
     /**
-     * Находит пользователя по имени в Telegram.
-     *
-     * @param userTgName имя пользователя в Telegram
-     * @return найденный пользователь или ошибка, если не найден
+     * Получает пользователя по идентификатору чата
+     * @param chatId идентификатор чата пользователя
+     * @return Mono с найденным пользователем
      */
-    public Mono<User> getUserByTgName(String userTgName) {
-        return Mono.fromCallable(() -> userCollection.find(Filters.eq("userTgName", userTgName)).first())
-            .switchIfEmpty(Mono.error(new RuntimeException("User not found")))
-            .map(this::documentToUser);
+    public Mono<User> getUserByChatId(String chatId) {
+        return Mono.fromCallable(() -> userCollection.find(Filters.eq("chatId", chatId)).first())
+            .map(this::documentToUser)
+            .doOnError(error -> log.error("Error getting user by chatId: {}", error.getMessage()));
     }
 
     /**
@@ -261,33 +260,6 @@ public class UserService {
     }
 
     /**
-     * Находит пользователя по ID чата в Telegram.
-     *
-     * @param chatId ID чата пользователя в Telegram
-     * @return Mono<User> найденный пользователь или пустой Mono, если не найден
-     */
-    public Mono<User> getUserByChatId(String chatId) {
-        String maskedChatId = ChatIdMasker.maskChatId(chatId);
-        log.info("Searching for user with chatId: {}", maskedChatId);
-        
-        if (chatId == null || chatId.trim().isEmpty()) {
-            log.warn("Invalid chatId provided");
-            return Mono.empty();
-        }
-
-        return Mono.fromCallable(() -> {
-            Document doc = userCollection.find(Filters.eq("chatId", chatId.trim())).first();
-            if (doc == null) {
-                log.warn("User not found with chatId: {}", maskedChatId);
-                return null;
-            }
-            User user = documentToUser(doc);
-            log.info("Found user with chatId: {}", maskedChatId);
-            return user;
-        });
-    }
-
-    /**
      * Сохраняет пользователя в базу данных.
      *
      * @param user пользователь для сохранения
@@ -320,44 +292,64 @@ public class UserService {
 
     private Document userToDocument(User user) {
         Document doc = new Document();
-        doc.append("_id", user.getChatId());
-        doc.append("userTgName", user.getUserTgName())
-           .append("chatId", user.getChatId())
+        if (user.getId() != null) {
+            doc.append("_id", user.getId());
+        }
+        doc.append("chatId", user.getChatId())
            .append("hasStarted", user.isHasStarted())
-           .append("portfolioIds", user.getPortfolioIds() != null ? user.getPortfolioIds() : new ArrayList<>())
-           .append("notificationIds", user.getNotificationIds() != null ? user.getNotificationIds() : new ArrayList<>());
+           .append("portfolioIds", user.getPortfolioIds())
+           .append("notificationIds", user.getNotificationIds());
         return doc;
     }
 
     private User documentToUser(Document doc) {
-        if (doc == null) {
-            return null;
-        }
         User user = new User();
-        user.setUserTgName(doc.getString("userTgName"));
+        if (doc.get("_id") != null) {
+            user.setId(doc.get("_id").toString());
+        }
         user.setChatId(doc.getString("chatId"));
-        if (doc.containsKey("hasStarted")) {
-            Boolean hasStarted = doc.getBoolean("hasStarted");
-            if (hasStarted != null && hasStarted) {
-                user.setHasStarted(true);
-            }
-        }
-        if (doc.containsKey("portfolioIds")) {
-            List<String> portfolioIds = doc.getList("portfolioIds", String.class);
-            if (portfolioIds != null) {
-                for (String id : portfolioIds) {
-                    user.addPortfolioId(id);
-                }
-            }
-        }
-        if (doc.containsKey("notificationIds")) {
-            List<String> notificationIds = doc.getList("notificationIds", String.class);
-            if (notificationIds != null) {
-                for (String id : notificationIds) {
-                    user.addNotificationId(id);
-                }
-            }
-        }
+        user.setHasStarted(doc.getBoolean("hasStarted", false));
+        user.setPortfolioIds(doc.getList("portfolioIds", String.class));
+        user.setNotificationIds(doc.getList("notificationIds", String.class));
         return user;
+    }
+
+    /**
+     * Проверяет, является ли команда публичной
+     * @param command команда для проверки
+     * @return true если команда публичная
+     */
+    public Mono<Boolean> isPublicCommand(String command) {
+        return Mono.just(PUBLIC_COMMANDS.contains(command.toLowerCase()));
+    }
+
+    /**
+     * Проверяет авторизацию пользователя
+     * @param command команда
+     * @param chatId ID чата пользователя
+     * @return Mono<Boolean> true если команда публичная или пользователь авторизован
+     */
+    public Mono<Boolean> checkUserAuthorization(String command, String chatId) {
+        return isPublicCommand(command)
+            .flatMap(isPublic -> {
+                if (isPublic) {
+                    return Mono.just(true);
+                }
+
+                // Для обычных команд проверяем наличие пользователя в БД
+                return getUserByChatId(chatId)
+                    .map(user -> user.isHasStarted())
+                    .defaultIfEmpty(false);
+            })
+            .doOnError(error -> log.error("Error checking authorization: {}", error.getMessage()));
+    }
+
+    /**
+     * Получает сообщение об ошибке авторизации
+     * @param command команда, для которой проверялась авторизация
+     * @return сообщение об ошибке
+     */
+    public String getAuthorizationErrorMessage(String command) {
+        return "❌ Пожалуйста, начните работу с ботом командой /start";
     }
 }

@@ -21,7 +21,7 @@ public class Application {
     public static void main(String[] args) {
         try {
             // Start Spring context with our configuration
-            ConfigurableApplicationContext context = new AnnotationConfigApplicationContext(ApplicationConfig.class);
+            ConfigurableApplicationContext context = new AnnotationConfigApplicationContext(AppConfigurations.class);
             logger.info("Spring context initialized successfully");
             
             // Get services from context
