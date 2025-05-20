@@ -2,7 +2,6 @@ package spbstu.mcs.telegramBot.cryptoApi;
 
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
-import static org.mockito.ArgumentMatchers.*;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -13,7 +12,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.ExchangeFunction;
 
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
@@ -21,8 +19,6 @@ import reactor.test.StepVerifier;
 import java.math.BigDecimal;
 import java.io.IOException;
 
-import spbstu.mcs.telegramBot.model.Currency;
-import spbstu.mcs.telegramBot.model.Currency.Crypto;
 import spbstu.mcs.telegramBot.model.Currency.Fiat;
 import spbstu.mcs.telegramBot.config.VaultConfig;
 

@@ -4,7 +4,6 @@
                 "config",
                 "security",
                 "model",
-                "controller",
                 "cryptoApi",
                 "service"
         }

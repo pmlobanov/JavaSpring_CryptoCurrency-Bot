@@ -12,7 +12,6 @@ import org.junit.runners.JUnit4;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
-import spbstu.mcs.telegramBot.DB.repositories.NotificationRepository;
 import spbstu.mcs.telegramBot.DB.services.NotificationService;
 import spbstu.mcs.telegramBot.DB.services.UserService;
 import spbstu.mcs.telegramBot.model.Currency;
@@ -43,7 +42,6 @@ public class AlertsHandlingTest {
     private ObjectMapper objectMapper;
     private CurrencyConverter currencyConverter;
     private PriceFetcher priceFetcher;
-    private NotificationRepository notificationRepository;
     private ObjectNode objectNode;
     private ArrayNode arrayNode;
     private JsonNode jsonNode;
@@ -60,7 +58,6 @@ public class AlertsHandlingTest {
         objectMapper = mock(ObjectMapper.class);
         currencyConverter = mock(CurrencyConverter.class);
         priceFetcher = mock(PriceFetcher.class);
-        notificationRepository = mock(NotificationRepository.class);
         objectNode = mock(ObjectNode.class);
         arrayNode = mock(ArrayNode.class);
         jsonNode = mock(JsonNode.class);
@@ -76,7 +73,6 @@ public class AlertsHandlingTest {
             priceFetcher,
             telegramBotService,
             notificationService,
-            ///notificationRepository,
             userService
         );
     }
@@ -110,6 +106,17 @@ public class AlertsHandlingTest {
         when(jsonNode.get("timestamp")).thenReturn(jsonNode);
         when(jsonNode.asText()).thenReturn("49000");
         when(jsonNode.asLong()).thenReturn(1234567890L);
+        
+        // Настройка мока для getAllUserAlerts
+        when(notificationService.getAllUserAlerts(chatId))
+            .thenReturn(Flux.empty()); // Возвращаем пустой Flux, так как у нас нет существующих алертов
+        
+        // Настройка мока для getUserByChatId
+        User testUser = new User();
+        testUser.setChatId(chatId);
+        testUser.setCurrentFiat(Currency.Fiat.USD.getCode());
+        when(userService.getUserByChatId(chatId))
+            .thenReturn(Mono.just(testUser));
         
         // Настройка мока для сохранения уведомления
         Notification notification = new Notification(
@@ -169,6 +176,17 @@ public class AlertsHandlingTest {
         when(jsonNode.get("timestamp")).thenReturn(jsonNode);
         when(jsonNode.asText()).thenReturn("50000");
         when(jsonNode.asLong()).thenReturn(1234567890L);
+        
+        // Настройка мока для getAllUserAlerts
+        when(notificationService.getAllUserAlerts(chatId))
+            .thenReturn(Flux.empty()); // Возвращаем пустой Flux, так как у нас нет существующих алертов
+        
+        // Настройка мока для getUserByChatId
+        User testUser = new User();
+        testUser.setChatId(chatId);
+        testUser.setCurrentFiat(Currency.Fiat.USD.getCode());
+        when(userService.getUserByChatId(chatId))
+            .thenReturn(Mono.just(testUser));
         
         // Настройка мока для сохранения уведомления
         Notification notification = new Notification(
@@ -241,6 +259,17 @@ public class AlertsHandlingTest {
         when(jsonNode.get("timestamp")).thenReturn(jsonNode);
         when(jsonNode.asText()).thenReturn("50000");
         when(jsonNode.asLong()).thenReturn(1234567890L);
+        
+        // Настройка мока для getAllUserAlerts
+        when(notificationService.getAllUserAlerts(chatId))
+            .thenReturn(Flux.empty()); // Возвращаем пустой Flux, так как у нас нет существующих алертов
+        
+        // Настройка мока для getUserByChatId
+        User testUser = new User();
+        testUser.setChatId(chatId);
+        testUser.setCurrentFiat(Currency.Fiat.USD.getCode());
+        when(userService.getUserByChatId(chatId))
+            .thenReturn(Mono.just(testUser));
         
         // Настройка мока для сохранения уведомления
         Notification notification = new Notification(
@@ -367,9 +396,16 @@ public class AlertsHandlingTest {
             49000.0
         );
         
-        // Настройка мока для получения уведомлений
-        when(notificationService.getActiveAlerts(eq(Crypto.BTC)))
+        // Настройка мока для getAllUserAlerts
+        when(notificationService.getAllUserAlerts(chatId))
             .thenReturn(Flux.just(notification));
+        
+        // Настройка мока для getUserByChatId
+        User testUser = new User();
+        testUser.setChatId(chatId);
+        testUser.setCurrentFiat(Currency.Fiat.USD.getCode());
+        when(userService.getUserByChatId(chatId))
+            .thenReturn(Mono.just(testUser));
         
         // Настройка мока для удаления уведомления
         when(notificationService.delete(any(Notification.class)))
@@ -380,11 +416,11 @@ public class AlertsHandlingTest {
         
         // Проверка результата
         StepVerifier.create(result)
-            .expectNext("Alert deleted successfully")
+            .expectNext("✅ Алерт успешно удален")
             .verifyComplete();
         
         // Проверка вызовов
-        verify(notificationService).getActiveAlerts(eq(Crypto.BTC));
+        verify(notificationService).getAllUserAlerts(chatId);
         verify(notificationService).delete(any(Notification.class));
     }
     

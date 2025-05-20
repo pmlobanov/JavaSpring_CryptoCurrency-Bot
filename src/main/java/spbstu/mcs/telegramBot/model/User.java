@@ -1,12 +1,9 @@
 package spbstu.mcs.telegramBot.model;
 
 import org.springframework.data.annotation.Id;
-import org.springframework.data.annotation.PersistenceConstructor;
-import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
-import spbstu.mcs.telegramBot.model.Currency;
-import java.beans.ConstructorProperties;
+
 
 import java.util.ArrayList;
 import java.util.List;
@@ -38,12 +35,11 @@ public class User {
     @Id
     private String id;
 
-    @Field("userTgName")
-    private String userTgName;
-
-    @Indexed(unique = true)
     @Field("chatId")
     private String chatId;
+
+    @Field("hasStarted")
+    private boolean hasStarted;
 
     @Field("portfolioIds")
     private List<String> portfolioIds;
@@ -51,8 +47,11 @@ public class User {
     @Field("notificationIds")
     private List<String> notificationIds;
 
-    @Field("hasStarted")
-    private boolean hasStarted;
+    @Field("currentFiat")
+    private String currentFiat;
+
+    @Field("currentCrypto")
+    private String currentCrypto;
 
     /**
      * Конструктор без параметров для Spring Data MongoDB
@@ -61,36 +60,30 @@ public class User {
         this.portfolioIds = new ArrayList<>();
         this.notificationIds = new ArrayList<>();
         this.hasStarted = false;
+        this.currentCrypto = Currency.Crypto.BTC.getCode();
+        this.currentFiat = Currency.Fiat.USD.getCode();
     }
 
     /**
-     * Создает нового пользователя с указанными параметрами.
-     *
-     * @param userTgName имя пользователя в Telegram
-     * @param chatId ID чата пользователя в Telegram
+     * Создает нового пользователя
+     * @param chatId идентификатор чата пользователя
      */
-    public User(String userTgName, String chatId) {
-        this.userTgName = userTgName;
+    public User(String chatId) {
+        this();
         this.chatId = chatId;
-        this.portfolioIds = new ArrayList<>();
-        this.notificationIds = new ArrayList<>();
-        this.hasStarted = false;
     }
 
     /**
-     * Создает нового пользователя с указанными параметрами.
-     *
-     * @param userTgName имя пользователя в Telegram
-     * @param chatId ID чата пользователя в Telegram
+     * Создает нового пользователя с указанными портфелями и уведомлениями
+     * @param chatId идентификатор чата пользователя
      * @param portfolioIds список идентификаторов портфелей
      * @param notificationIds список идентификаторов уведомлений
      */
-    public User(String userTgName, String chatId, List<String> portfolioIds, List<String> notificationIds) {
-        this.userTgName = userTgName;
+    public User(String chatId, List<String> portfolioIds, List<String> notificationIds) {
+        this();
         this.chatId = chatId;
         this.portfolioIds = portfolioIds != null ? portfolioIds : new ArrayList<>();
         this.notificationIds = notificationIds != null ? notificationIds : new ArrayList<>();
-        this.hasStarted = false;
     }
 
     /**
@@ -115,6 +108,14 @@ public class User {
      */
     public String getId() {
         return id;
+    }
+
+    /**
+     * Устанавливает уникальный идентификатор пользователя.
+     * @param id новый ID пользователя
+     */
+    public void setId(String id) {
+        this.id = id;
     }
 
     /**
@@ -170,14 +171,6 @@ public class User {
     // Сеттеры
 
     /**
-     * Устанавливает имя пользователя в Telegram.
-     * @param userTgName новое имя пользователя
-     */
-    public void setUserTgName(String userTgName) {
-        this.userTgName = userTgName;
-    }
-
-    /**
      * Устанавливает ID чата пользователя в Telegram.
      * @param chatId новое ID чата пользователя
      */
@@ -194,14 +187,6 @@ public class User {
     }
 
     /**
-     * Возвращает имя пользователя в Telegram.
-     * @return имя пользователя в Telegram
-     */
-    public String getUserTgName() {
-        return userTgName;
-    }
-
-    /**
      * Возвращает строковое представление пользователя.
      * @return строковое описание со всеми полями
      */
@@ -209,10 +194,12 @@ public class User {
     public String toString() {
         return "User{" +
                 "id='" + id + '\'' +
-                ", userTgName='" + userTgName + '\'' +
                 ", chatId='" + chatId + '\'' +
+                ", hasStarted=" + hasStarted +
                 ", portfolioIds=" + portfolioIds +
                 ", notificationIds=" + notificationIds +
+                ", currentFiat='" + currentFiat + '\'' +
+                ", currentCrypto='" + currentCrypto + '\'' +
                 '}';
     }
 
@@ -222,5 +209,25 @@ public class User {
 
     public void setHasStarted(boolean hasStarted) {
         this.hasStarted = hasStarted;
+    }
+
+    public String getCurrentFiat() {
+        return currentFiat;
+    }
+
+    public void setCurrentFiat(String currentFiat) {
+        this.currentFiat = currentFiat;
+    }
+
+    public Currency.Fiat getFiatCurrency() {
+        return Currency.Fiat.valueOf(currentFiat);
+    }
+
+    public String getCurrentCrypto() {
+        return currentCrypto;
+    }
+
+    public void setCurrentCrypto(String currentCrypto) {
+        this.currentCrypto = currentCrypto;
     }
 }

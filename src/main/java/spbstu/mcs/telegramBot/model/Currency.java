@@ -15,7 +15,6 @@ public class Currency {
         CNY("CNY");
         
         private final String code;
-        private static Fiat currentFiat = USD;
         
         Fiat(String code) {
             this.code = code;
@@ -25,13 +24,6 @@ public class Currency {
             return code;
         }
         
-        public static Fiat getCurrentFiat() {
-            return currentFiat;
-        }
-        
-        public static void setCurrentFiat(Fiat fiat) {
-            currentFiat = fiat;
-        }
     }
     
     /**
@@ -50,7 +42,6 @@ public class Currency {
         
         private final String code;
         private final String name;
-        private static Crypto currentCrypto = BTC;
         
         Crypto(String code, String name) {
             this.code = code;
@@ -65,13 +56,6 @@ public class Currency {
             return name;
         }
         
-        public static Crypto getCurrentCrypto() {
-            return currentCrypto;
-        }
-        
-        public static void setCurrentCrypto(Crypto crypto) {
-            currentCrypto = crypto;
-        }
 
         public static Crypto fromSymbol(String symbol) {
             String cryptoCode = symbol.split("-")[0];

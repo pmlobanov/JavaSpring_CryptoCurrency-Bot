@@ -11,18 +11,15 @@ import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
-import spbstu.mcs.telegramBot.DB.repositories.PortfolioRepository;
 import spbstu.mcs.telegramBot.DB.services.PortfolioService;
-import spbstu.mcs.telegramBot.service.PortfolioManagement;
-import spbstu.mcs.telegramBot.model.Currency.Crypto;
+import spbstu.mcs.telegramBot.DB.services.UserService;
 import spbstu.mcs.telegramBot.model.Portfolio;
+import spbstu.mcs.telegramBot.model.Currency;
+import spbstu.mcs.telegramBot.model.User;
 
 import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Optional;
-
-import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
 
 /**
@@ -37,8 +34,8 @@ public class CryptoPortfolioManagerTest {
     private ObjectMapper objectMapper;
     private JsonNode jsonNode;
     private ObjectNode objectNode;
+    private UserService userService;
     
-    private PortfolioManagement portfolioManagement;
     private CryptoPortfolioManager portfolioManager;
     
     private static final String TEST_CHAT_ID = "123456789";
@@ -47,22 +44,28 @@ public class CryptoPortfolioManagerTest {
     @Before
     public void setUp() throws JsonMappingException, JsonProcessingException {
         // Создаем моки вручную
-        portfolioService= mock(PortfolioService.class);
+        portfolioService = mock(PortfolioService.class);
         priceFetcher = mock(PriceFetcher.class);
         currencyConverter = mock(CurrencyConverter.class);
         objectMapper = mock(ObjectMapper.class);
         jsonNode = mock(JsonNode.class);
         objectNode = mock(ObjectNode.class);
+        userService = mock(UserService.class);
         
         // Настройка ObjectMapper
         when(objectMapper.createObjectNode()).thenReturn(objectNode);
         when(objectMapper.readTree(anyString())).thenReturn(jsonNode);
         
-        portfolioManagement = new PortfolioManagement(
-                portfolioService,
-            priceFetcher,
+        // Настройка JsonNode для общих полей
+        when(jsonNode.get("timestamp")).thenReturn(jsonNode);
+        when(jsonNode.asLong()).thenReturn(1234567890L);
+        
+        portfolioManager = new CryptoPortfolioManager(
+            objectMapper,
             currencyConverter,
-            objectMapper
+            priceFetcher,
+            portfolioService,
+            userService
         );
     }
     
@@ -70,338 +73,388 @@ public class CryptoPortfolioManagerTest {
      * Тест метода getPortfolioInfo
      */
     @Test
-    public void testGetPortfolioInfo() {
-        // Создаем тестовый портфель
+    public void testGetPortfolioInfo() throws JsonProcessingException {
+        // Подготовка тестовых данных
         Portfolio portfolio = new Portfolio(TEST_CHAT_ID);
-        portfolio.setCryptoCurrency(Crypto.BTC);
+        portfolio.setCryptoCurrency(Currency.Crypto.BTC);
         portfolio.setCount(new BigDecimal("1.5"));
-        portfolio.setLastCryptoPrice(new BigDecimal("45000"));
         
-        // Настройка мока для получения портфеля по ID
-        when(portfolioService.findById(TEST_PORTFOLIO_ID))
-            .thenReturn(Optional.of(portfolio));
+        // Настройка моков
+        when(portfolioService.getPortfoliosByChatId(TEST_CHAT_ID))
+            .thenReturn(List.of(portfolio));
+            
+        // Настройка мока для получения цены
+        String priceJson = "{\"symbol\":\"BTC-USDT\",\"price\":\"50000\",\"timestamp\":1234567890}";
+        when(priceFetcher.getCurrentPrice(Currency.Crypto.BTC))
+            .thenReturn(Mono.just(priceJson));
+            
+        // Настройка мока для чтения JSON
+        when(objectMapper.readTree(priceJson)).thenReturn(jsonNode);
+        when(jsonNode.get("price")).thenReturn(jsonNode);
+        when(jsonNode.asText()).thenReturn("50000");
         
-        // Выполнение тестируемого метода
-        Mono<String> result = portfolioManagement.getPortfolioInfo(TEST_PORTFOLIO_ID);
+        // Настройка мока для конвертации валют
+        when(currencyConverter.getUsdToFiatRate(any(Currency.Fiat.class)))
+            .thenReturn(Mono.just(new BigDecimal("1.0")));
+            
+        // Настройка мока для получения пользователя
+        User testUser = new User(TEST_CHAT_ID);
+        testUser.setCurrentFiat(Currency.Fiat.USD.getCode());
+        when(userService.getUserByChatId(TEST_CHAT_ID))
+            .thenReturn(Mono.just(testUser));
+        
+        // Выполнение теста
+        Mono<String> result = portfolioManager.getPortfolioInfo(TEST_CHAT_ID);
         
         // Проверка результата
         StepVerifier.create(result)
             .expectNextMatches(response -> 
-                response.contains("Информация о портфеле") &&
+                response.contains("Портфель") && 
+                response.contains("активов") &&
                 response.contains("BTC") &&
-                response.contains("1.5")
-            )
-            .expectComplete()
-            .verify(java.time.Duration.ofSeconds(5));
-        
+                response.contains("1,500000") &&
+                response.contains("75000,00 USD") &&
+                response.contains("Итого: 75000,00 USD"))
+            .verifyComplete();
+            
         // Проверка вызовов
-        verify(portfolioService).findById(TEST_PORTFOLIO_ID);
+        verify(portfolioService).getPortfoliosByChatId(TEST_CHAT_ID);
+        verify(priceFetcher).getCurrentPrice(Currency.Crypto.BTC);
+        verify(currencyConverter).getUsdToFiatRate(any(Currency.Fiat.class));
+    }
+    
+    /**
+     * Тест метода add
+     */
+    @Test
+    public void testAddCrypto() throws JsonProcessingException {
+        // Подготовка тестовых данных
+        Portfolio portfolio = new Portfolio(TEST_CHAT_ID);
+        portfolio.setCryptoCurrency(Currency.Crypto.BTC);
+        portfolio.setCount(new BigDecimal("1.0"));
+        
+        // Настройка моков
+        when(portfolioService.addCryptoToPortfolio(any(), any(), any()))
+            .thenReturn(portfolio);
+            
+        // Настройка мока для получения цены
+        String priceJson = "{\"symbol\":\"BTC-USDT\",\"price\":\"50000\",\"timestamp\":1234567890}";
+        when(priceFetcher.getCurrentPrice(Currency.Crypto.BTC))
+            .thenReturn(Mono.just(priceJson));
+            
+        // Настройка мока для чтения JSON
+        JsonNode priceNode = mock(JsonNode.class);
+        JsonNode timestampNode = mock(JsonNode.class);
+        JsonNode symbolNode = mock(JsonNode.class);
+        
+        when(objectMapper.readTree(priceJson)).thenReturn(jsonNode);
+        when(jsonNode.get("price")).thenReturn(priceNode);
+        when(jsonNode.get("timestamp")).thenReturn(timestampNode);
+        when(jsonNode.get("symbol")).thenReturn(symbolNode);
+        
+        when(priceNode.asText()).thenReturn("50000");
+        when(timestampNode.asLong()).thenReturn(1234567890L);
+        when(symbolNode.asText()).thenReturn("BTC-USDT");
+        
+        // Настройка мока для создания результата
+        ObjectNode resultNode = mock(ObjectNode.class);
+        when(objectMapper.createObjectNode()).thenReturn(resultNode);
+        when(resultNode.put(anyString(), anyString())).thenReturn(resultNode);
+        when(resultNode.put(anyString(), anyLong())).thenReturn(resultNode);
+        when(objectMapper.writeValueAsString(resultNode)).thenReturn(
+            "{\"symbol\":\"BTC-USD\",\"count\":\"0.500000\",\"price\":\"50000.00\",\"value\":\"25000.00\",\"timestamp\":1234567890}"
+        );
+        
+        // Настройка мока для конвертации валют
+        when(currencyConverter.getUsdToFiatRate(any(Currency.Fiat.class)))
+            .thenReturn(Mono.just(new BigDecimal("1.0")));
+            
+        // Настройка мока для получения пользователя
+        User testUser = new User(TEST_CHAT_ID);
+        testUser.setCurrentFiat(Currency.Fiat.USD.getCode());
+        when(userService.getUserByChatId(TEST_CHAT_ID))
+            .thenReturn(Mono.just(testUser));
+        
+        portfolioManager.setCurrentPortfolio(portfolio);
+        
+        // Выполнение теста
+        Mono<String> result = portfolioManager.add(Currency.Crypto.BTC, new BigDecimal("0.5"));
+        
+        // Проверка результата
+        StepVerifier.create(result)
+            .expectNextMatches(response -> 
+                response.contains("BTC") && 
+                response.contains("0.500000") &&
+                response.contains("50000.00") &&
+                response.contains("25000.00"))
+            .verifyComplete();
+            
+        // Проверка вызовов
+        verify(portfolioService).addCryptoToPortfolio(any(), any(), any());
+        verify(priceFetcher).getCurrentPrice(Currency.Crypto.BTC);
+        verify(currencyConverter).getUsdToFiatRate(any(Currency.Fiat.class));
+    }
+    
+    /**
+     * Тест метода remove
+     */
+    @Test
+    public void testRemoveCrypto() throws JsonProcessingException {
+        // Подготовка тестовых данных
+        Portfolio portfolio = new Portfolio(TEST_CHAT_ID);
+        portfolio.setCryptoCurrency(Currency.Crypto.BTC);
+        portfolio.setCount(new BigDecimal("1.0"));
+        
+        // Настройка моков
+        when(portfolioService.removeCryptoFromPortfolio(any(), any(), any()))
+            .thenReturn(portfolio);
+            
+        // Настройка мока для получения цены
+        String priceJson = "{\"symbol\":\"BTC-USDT\",\"price\":\"50000\",\"timestamp\":1234567890}";
+        when(priceFetcher.getCurrentPrice(Currency.Crypto.BTC))
+            .thenReturn(Mono.just(priceJson));
+            
+        // Настройка мока для чтения JSON
+        JsonNode priceNode = mock(JsonNode.class);
+        JsonNode timestampNode = mock(JsonNode.class);
+        JsonNode symbolNode = mock(JsonNode.class);
+        
+        when(objectMapper.readTree(priceJson)).thenReturn(jsonNode);
+        when(jsonNode.get("price")).thenReturn(priceNode);
+        when(jsonNode.get("timestamp")).thenReturn(timestampNode);
+        when(jsonNode.get("symbol")).thenReturn(symbolNode);
+        
+        when(priceNode.asText()).thenReturn("50000");
+        when(timestampNode.asLong()).thenReturn(1234567890L);
+        when(symbolNode.asText()).thenReturn("BTC-USDT");
+        
+        // Настройка мока для создания результата
+        ObjectNode resultNode = mock(ObjectNode.class);
+        when(objectMapper.createObjectNode()).thenReturn(resultNode);
+        when(resultNode.put(anyString(), anyString())).thenReturn(resultNode);
+        when(resultNode.put(anyString(), anyLong())).thenReturn(resultNode);
+        when(objectMapper.writeValueAsString(resultNode)).thenReturn(
+            "{\"status\":\"success\",\"symbol\":\"BTC-USD\",\"count\":\"0.500000\",\"price\":\"50000.00\",\"value\":\"25000.00\",\"timestamp\":1234567890}"
+        );
+        
+        // Настройка мока для конвертации валют
+        when(currencyConverter.getUsdToFiatRate(any(Currency.Fiat.class)))
+            .thenReturn(Mono.just(new BigDecimal("1.0")));
+            
+        // Настройка мока для получения пользователя
+        User testUser = new User(TEST_CHAT_ID);
+        testUser.setCurrentFiat(Currency.Fiat.USD.getCode());
+        when(userService.getUserByChatId(TEST_CHAT_ID))
+            .thenReturn(Mono.just(testUser));
+        
+        portfolioManager.setCurrentPortfolio(portfolio);
+        
+        // Выполнение теста
+        Mono<String> result = portfolioManager.remove(Currency.Crypto.BTC, new BigDecimal("0.5"));
+        
+        // Проверка результата
+        StepVerifier.create(result)
+            .expectNextMatches(response -> 
+                response.contains("success") &&
+                response.contains("BTC") && 
+                response.contains("0.500000") &&
+                response.contains("50000.00") &&
+                response.contains("25000.00"))
+            .verifyComplete();
+            
+        // Проверка вызовов
+        verify(portfolioService).removeCryptoFromPortfolio(any(), any(), any());
+        verify(priceFetcher).getCurrentPrice(Currency.Crypto.BTC);
+        verify(currencyConverter).getUsdToFiatRate(any(Currency.Fiat.class));
     }
     
     /**
      * Тест метода getPortfolioValue
      */
     @Test
-    public void testGetPortfolioValue() throws JsonProcessingException, JsonMappingException {
-        // Создаем тестовый портфель
+    public void testGetPortfolioValue() throws JsonProcessingException {
+        // Подготовка тестовых данных
         Portfolio portfolio = new Portfolio(TEST_CHAT_ID);
-        portfolio.setCryptoCurrency(Crypto.BTC);
+        portfolio.setCryptoCurrency(Currency.Crypto.BTC);
         portfolio.setCount(new BigDecimal("1.5"));
         
-        // Настройка мока для получения портфеля по ID
-        when(portfolioService.findById(TEST_PORTFOLIO_ID))
-            .thenReturn(Optional.of(portfolio));
+        // Настройка моков
+        when(portfolioService.getPortfoliosByChatId(TEST_CHAT_ID))
+            .thenReturn(List.of(portfolio));
+            
+        // Настройка мока для получения цены
+        String priceJson = "{\"symbol\":\"BTC-USDT\",\"price\":\"50000\",\"timestamp\":1234567890}";
+        when(priceFetcher.getCurrentPrice(Currency.Crypto.BTC))
+            .thenReturn(Mono.just(priceJson));
+            
+        // Настройка мока для чтения JSON
+        when(objectMapper.readTree(priceJson)).thenReturn(jsonNode);
+        when(jsonNode.get("price")).thenReturn(jsonNode);
+        when(jsonNode.asText()).thenReturn("50000");
         
-        // Создаем конкретный JSON-ответ для цены
-        String priceJson = "{\"price\":\"50000\",\"timestamp\":1234567890}";
+        // Настройка мока для конвертации валют
+        when(currencyConverter.getUsdToFiatRate(any(Currency.Fiat.class)))
+            .thenReturn(Mono.just(new BigDecimal("1.0")));
+            
+        // Настройка мока для получения пользователя
+        User testUser = new User(TEST_CHAT_ID);
+        testUser.setCurrentFiat(Currency.Fiat.USD.getCode());
+        when(userService.getUserByChatId(TEST_CHAT_ID))
+            .thenReturn(Mono.just(testUser));
         
-        // Настройка мока для получения текущей цены - используем doReturn для предотвращения реальных вызовов
-        doReturn(Mono.just(priceJson))
-            .when(priceFetcher).getCurrentPrice(any(Crypto.class));
-        
-        // Более детальное мокирование JsonNode для гарантии правильной обработки
-        JsonNode priceNode = mock(JsonNode.class);
-        when(priceNode.asText()).thenReturn("50000");
-        
-        // Настройка мока для ObjectMapper
-        when(objectMapper.readTree(eq(priceJson))).thenReturn(priceNode);
-        when(priceNode.get("price")).thenReturn(priceNode);
-        
-        // Настройка мока для сохранения портфеля
-        when(portfolioService.save(any(Portfolio.class)))
-            .thenReturn(portfolio);
-        
-        // Выполнение тестируемого метода с таймаутом для предотвращения зависания
-        Mono<String> result = portfolioManagement.getPortfolioValue(TEST_PORTFOLIO_ID)
-            .timeout(java.time.Duration.ofSeconds(3));
+        // Выполнение теста
+        Mono<String> result = portfolioManager.getPortfolioInfo(TEST_CHAT_ID);
         
         // Проверка результата
         StepVerifier.create(result)
             .expectNextMatches(response -> 
-                response.contains("Стоимость портфеля") &&
-                response.contains("75000")
-            )
-            .expectComplete()
-            .verify(java.time.Duration.ofSeconds(5));
-        
-        // Проверка вызовов
-        verify(portfolioService).findById(TEST_PORTFOLIO_ID);
-        verify(priceFetcher).getCurrentPrice(Crypto.BTC);
-        verify(portfolioService).save(any(Portfolio.class));
+                response.contains("Портфель") && 
+                response.contains("активов") &&
+                response.contains("BTC") &&
+                response.contains("1,500000") &&
+                response.contains("75000,00 USD") &&
+                response.contains("Итого: 75000,00 USD"))
+            .verifyComplete();
     }
     
     /**
      * Тест метода getPortfoliosByChatId
      */
     @Test
-    public void testGetPortfoliosByChatId() {
-        try {
-            // Создаем тестовые портфели
-            Portfolio portfolio1 = new Portfolio(TEST_CHAT_ID);
-            portfolio1.setCryptoCurrency(Crypto.BTC);
-            portfolio1.setCount(new BigDecimal("1.0"));
+    public void testGetPortfoliosByChatId() throws JsonProcessingException {
+        // Подготовка тестовых данных
+        Portfolio portfolio1 = new Portfolio(TEST_CHAT_ID);
+        portfolio1.setCryptoCurrency(Currency.Crypto.BTC);
+        portfolio1.setCount(new BigDecimal("1.0"));
+        
+        Portfolio portfolio2 = new Portfolio(TEST_CHAT_ID);
+        portfolio2.setCryptoCurrency(Currency.Crypto.ETH);
+        portfolio2.setCount(new BigDecimal("10.0"));
+        
+        List<Portfolio> portfolios = Arrays.asList(portfolio1, portfolio2);
+        
+        // Настройка моков
+        when(portfolioService.getPortfoliosByChatId(TEST_CHAT_ID))
+            .thenReturn(portfolios);
             
-            Portfolio portfolio2 = new Portfolio(TEST_CHAT_ID);
-            portfolio2.setCryptoCurrency(Crypto.ETH);
-            portfolio2.setCount(new BigDecimal("10.0"));
+        // Настройка мока для получения цен
+        String btcPriceJson = "{\"symbol\":\"BTC-USDT\",\"price\":\"50000\",\"timestamp\":1234567890}";
+        String ethPriceJson = "{\"symbol\":\"ETH-USDT\",\"price\":\"3000\",\"timestamp\":1234567890}";
+        
+        when(priceFetcher.getCurrentPrice(Currency.Crypto.BTC))
+            .thenReturn(Mono.just(btcPriceJson));
+        when(priceFetcher.getCurrentPrice(Currency.Crypto.ETH))
+            .thenReturn(Mono.just(ethPriceJson));
             
-            List<Portfolio> portfolios = Arrays.asList(portfolio1, portfolio2);
+        // Настройка мока для чтения JSON
+        when(objectMapper.readTree(btcPriceJson)).thenReturn(jsonNode);
+        when(objectMapper.readTree(ethPriceJson)).thenReturn(jsonNode);
+        when(jsonNode.get("price")).thenReturn(jsonNode);
+        when(jsonNode.asText()).thenReturn("50000", "3000");
+        
+        // Настройка мока для конвертации валют
+        when(currencyConverter.getUsdToFiatRate(any(Currency.Fiat.class)))
+            .thenReturn(Mono.just(new BigDecimal("1.0")));
             
-            // Настройка мока для получения портфелей по chatId
-            doReturn(portfolios).when(portfolioService).findByChatId(TEST_CHAT_ID);
-            
-            // Выполнение тестируемого метода с таймаутом
-            List<Portfolio> result = portfolioManagement.getPortfoliosByChatId(TEST_CHAT_ID);
-            
-            // Проверка результата
-            assertNotNull("Результат не должен быть null", result);
-            assertEquals("Должно быть возвращено 2 портфеля", 2, result.size());
-            assertEquals("Первый портфель должен содержать BTC", Crypto.BTC, result.get(0).getCryptoCurrency());
-            assertEquals("Второй портфель должен содержать ETH", Crypto.ETH, result.get(1).getCryptoCurrency());
-            
-            // Проверка вызовов
-            verify(portfolioService, times(1)).findByChatId(TEST_CHAT_ID);
-        } catch (Exception e) {
-            fail("Тест завершился с ошибкой: " + e.getMessage());
-        }
+        // Настройка мока для получения пользователя
+        User testUser = new User(TEST_CHAT_ID);
+        testUser.setCurrentFiat(Currency.Fiat.USD.getCode());
+        when(userService.getUserByChatId(TEST_CHAT_ID))
+            .thenReturn(Mono.just(testUser));
+        
+        // Выполнение теста
+        Mono<String> result = portfolioManager.getPortfolioInfo(TEST_CHAT_ID);
+        
+        // Проверка результата
+        StepVerifier.create(result)
+            .expectNextMatches(response -> 
+                response.contains("Портфель") && 
+                response.contains("активов") &&
+                response.contains("BTC") &&
+                response.contains("ETH") &&
+                response.contains("1,000000") &&
+                response.contains("10,000000") &&
+                response.contains("Итого:"))
+            .verifyComplete();
     }
     
     /**
-     * Тест метода save
+     * Тест метода createPortfolio
      */
     @Test
-    public void testSave() {
-        try {
-            // Создаем тестовый портфель
-            Portfolio portfolio = new Portfolio(TEST_CHAT_ID);
-            portfolio.setCryptoCurrency(Crypto.BTC);
-            portfolio.setCount(new BigDecimal("1.5"));
-            
-            // Настройка мока для сохранения портфеля
-            doReturn(portfolio).when(portfolioService).save(portfolio);
-            
-            // Выполнение тестируемого метода
-            Portfolio result = portfolioManagement.save(portfolio);
-            
-            // Проверка результата
-            assertNotNull("Результат не должен быть null", result);
-            assertEquals("Криптовалюта должна быть BTC", Crypto.BTC, result.getCryptoCurrency());
-            assertEquals("Количество должно быть 1.5", new BigDecimal("1.5"), result.getCount());
-            
-            // Проверка вызовов
-            verify(portfolioService, times(1)).save(portfolio);
-        } catch (Exception e) {
-            fail("Тест завершился с ошибкой: " + e.getMessage());
-        }
-    }
-    
-    /**
-     * Тест метода findById - получение портфеля по ID
-     */
-    @Test
-    public void testFindById() {
-        try {
-            // Создаем тестовый портфель
-            Portfolio expectedPortfolio = new Portfolio(TEST_CHAT_ID);
-            // ID устанавливается MongoDB автоматически, в тесте мы используем рефлексию для тестирования
-            setPrivateField(expectedPortfolio, "id", TEST_PORTFOLIO_ID);
-            expectedPortfolio.setCryptoCurrency(Crypto.BTC);
-            expectedPortfolio.setCount(new BigDecimal("1.5"));
-            
-            // Настройка мока для получения портфеля по ID
-            doReturn(Optional.of(expectedPortfolio)).when(portfolioService).findById(TEST_PORTFOLIO_ID);
-            
-            // Выполнение тестируемого метода
-            Optional<Portfolio> result = portfolioService.findById(TEST_PORTFOLIO_ID);
-            
-            // Проверка результата
-            assertTrue("Результат должен содержать портфель", result.isPresent());
-            assertEquals("ID портфеля должен совпадать", TEST_PORTFOLIO_ID, result.get().getId());
-            assertEquals("Криптовалюта должна быть BTC", Crypto.BTC, result.get().getCryptoCurrency());
-            assertEquals("Количество должно быть 1.5", new BigDecimal("1.5"), result.get().getCount());
-            
-            // Проверка вызовов
-            verify(portfolioService, times(1)).findById(TEST_PORTFOLIO_ID);
-        } catch (Exception e) {
-            fail("Тест завершился с ошибкой: " + e.getMessage());
-        }
-    }
-    
-    /**
-     * Тест метода addCryptoToPortfolio - добавление криптовалюты в портфель
-     */
-    @Test
-    public void testAddCryptoToPortfolio() {
-        try {
-            // Подготовка данных
-            Portfolio initialPortfolio = new Portfolio(TEST_CHAT_ID);
-            setPrivateField(initialPortfolio, "id", TEST_PORTFOLIO_ID);
-            initialPortfolio.setCryptoCurrency(Crypto.BTC);
-            initialPortfolio.setCount(new BigDecimal("1.0"));
-            
-            Portfolio updatedPortfolio = new Portfolio(TEST_CHAT_ID);
-            setPrivateField(updatedPortfolio, "id", TEST_PORTFOLIO_ID);
-            updatedPortfolio.setCryptoCurrency(Crypto.BTC);
-            updatedPortfolio.setCount(new BigDecimal("2.5")); // 1.0 + 1.5
-            
-            // Мокируем поведение репозитория - используем doReturn для предотвращения реальных вызовов
-            doReturn(Optional.of(initialPortfolio)).when(portfolioService).findById(TEST_PORTFOLIO_ID);
-            doReturn(updatedPortfolio).when(portfolioService).save(any(Portfolio.class));
-            
-            // Проверяем, что портфель существует
-            Optional<Portfolio> foundPortfolio = portfolioService.findById(TEST_PORTFOLIO_ID);
-            assertTrue("Портфель должен быть найден", foundPortfolio.isPresent());
-            
-            // Добавляем монеты в портфель и сохраняем
-            Portfolio portfolio = foundPortfolio.get();
-            BigDecimal oldAmount = portfolio.getCount();
-            BigDecimal amountToAdd = new BigDecimal("1.5");
-            portfolio.setCount(oldAmount.add(amountToAdd));
-            Portfolio saved = portfolioService.save(portfolio);
-            
-            // Проверяем результат
-            assertNotNull("Сохраненный портфель не должен быть null", saved);
-            assertEquals("ID должен сохраниться", TEST_PORTFOLIO_ID, saved.getId());
-            assertEquals("Криптовалюта должна быть BTC", Crypto.BTC, saved.getCryptoCurrency());
-            assertEquals("Новое количество должно быть 2.5", new BigDecimal("2.5"), saved.getCount());
-            
-            // Проверка вызовов
-            verify(portfolioService).findById(TEST_PORTFOLIO_ID);
-            verify(portfolioService).save(any(Portfolio.class));
-        } catch (Exception e) {
-            fail("Тест завершился с ошибкой: " + e.getMessage());
-        }
-    }
-    
-    /**
-     * Тест метода removeCryptoFromPortfolio - удаление криптовалюты из портфеля
-     */
-    @Test
-    public void testRemoveCryptoFromPortfolio() throws Exception {
-        // Подготовка данных
-        Portfolio initialPortfolio = new Portfolio(TEST_CHAT_ID);
-        setPrivateField(initialPortfolio, "id", TEST_PORTFOLIO_ID);
-        initialPortfolio.setCryptoCurrency(Crypto.BTC);
-        initialPortfolio.setCount(new BigDecimal("2.5"));
+    public void testCreatePortfolio() throws JsonProcessingException {
+        // Подготовка тестовых данных
+        Portfolio portfolio = new Portfolio(TEST_CHAT_ID);
+        portfolio.setCryptoCurrency(Currency.Crypto.BTC);
+        portfolio.setCount(new BigDecimal("1.0"));
         
-        Portfolio updatedPortfolio = new Portfolio(TEST_CHAT_ID);
-        setPrivateField(updatedPortfolio, "id", TEST_PORTFOLIO_ID);
-        updatedPortfolio.setCryptoCurrency(Crypto.BTC);
-        updatedPortfolio.setCount(new BigDecimal("1.0")); // 2.5 - 1.5
+        // Настройка моков
+        when(portfolioService.createPortfolio(TEST_CHAT_ID))
+            .thenReturn(Mono.just(portfolio));
+        when(portfolioService.getPortfoliosByChatId(TEST_CHAT_ID))
+            .thenReturn(List.of(portfolio));
+            
+        // Настройка мока для получения цены
+        String priceJson = "{\"symbol\":\"BTC-USDT\",\"price\":\"50000\",\"timestamp\":1234567890}";
+        when(priceFetcher.getCurrentPrice(Currency.Crypto.BTC))
+            .thenReturn(Mono.just(priceJson));
+            
+        // Настройка мока для чтения JSON
+        JsonNode priceNode = mock(JsonNode.class);
+        JsonNode timestampNode = mock(JsonNode.class);
+        JsonNode symbolNode = mock(JsonNode.class);
         
-        // Мокируем поведение репозитория
-        when(portfolioService.findById(TEST_PORTFOLIO_ID)).thenReturn(Optional.of(initialPortfolio));
-        when(portfolioService.save(any(Portfolio.class))).thenReturn(updatedPortfolio);
+        when(objectMapper.readTree(priceJson)).thenReturn(jsonNode);
+        when(jsonNode.get("price")).thenReturn(priceNode);
+        when(jsonNode.get("timestamp")).thenReturn(timestampNode);
+        when(jsonNode.get("symbol")).thenReturn(symbolNode);
         
-        // Вызываем метод для удаления криптовалюты из портфеля
-        BigDecimal amountToRemove = new BigDecimal("1.5");
+        when(priceNode.asText()).thenReturn("50000");
+        when(timestampNode.asLong()).thenReturn(1234567890L);
+        when(symbolNode.asText()).thenReturn("BTC-USDT");
         
-        // Получаем портфель
-        Optional<Portfolio> portfolioOpt = portfolioService.findById(TEST_PORTFOLIO_ID);
-        assertTrue(portfolioOpt.isPresent());
+        // Настройка мока для конвертации валют
+        when(currencyConverter.getUsdToFiatRate(any(Currency.Fiat.class)))
+            .thenReturn(Mono.just(new BigDecimal("1.0")));
+            
+        // Настройка мока для получения пользователя
+        User testUser = new User(TEST_CHAT_ID);
+        testUser.setCurrentFiat(Currency.Fiat.USD.getCode());
+        when(userService.getUserByChatId(TEST_CHAT_ID))
+            .thenReturn(Mono.just(testUser));
         
-        // Удаляем криптовалюту и сохраняем
-        Portfolio portfolio = portfolioOpt.get();
-        BigDecimal newAmount = portfolio.getCount().subtract(amountToRemove);
-        portfolio.setCount(newAmount);
-        Portfolio result = portfolioService.save(portfolio);
+        // Выполнение теста
+        Mono<String> result = portfolioManager.getPortfolioInfo(TEST_CHAT_ID);
         
-        // Проверяем результат
-        assertNotNull("Результат не должен быть null", result);
-        assertEquals("ID должен сохраниться", TEST_PORTFOLIO_ID, result.getId());
-        assertEquals("Криптовалюта должна быть BTC", Crypto.BTC, result.getCryptoCurrency());
-        assertEquals("Новое количество должно быть 1.0", new BigDecimal("1.0"), result.getCount());
-        
+        // Проверка результата
+        StepVerifier.create(result)
+            .expectNextMatches(response -> 
+                response.contains("👜 Портфель") && 
+                response.contains("активов") &&
+                response.contains("BTC") &&
+                response.contains("1,000000") &&
+                response.contains("50000,00 USD") &&
+                response.contains("💼 Итого: 50000,00 USD"))
+            .verifyComplete();
+            
         // Проверка вызовов
-        verify(portfolioService).findById(TEST_PORTFOLIO_ID);
-        verify(portfolioService).save(any(Portfolio.class));
+        verify(portfolioService).getPortfoliosByChatId(TEST_CHAT_ID);
+        verify(priceFetcher).getCurrentPrice(Currency.Crypto.BTC);
+        verify(currencyConverter).getUsdToFiatRate(any(Currency.Fiat.class));
     }
     
     /**
-     * Тест метода createPortfolio - создание нового портфеля
-     */
-    @Test
-    public void testCreatePortfolio() {
-        try {
-            // Создаем данные для теста
-            String chatId = TEST_CHAT_ID;
-            Crypto crypto = Crypto.ETH;
-            BigDecimal amount = new BigDecimal("5.0");
-            
-            // Создаем тестовый портфель для результата
-            Portfolio newPortfolio = new Portfolio(chatId);
-            setPrivateField(newPortfolio, "id", TEST_PORTFOLIO_ID);
-            newPortfolio.setCryptoCurrency(crypto);
-            newPortfolio.setCount(amount);
-            
-            // Настройка мока для сохранения нового портфеля - используем doReturn для предотвращения реальных вызовов
-            doReturn(newPortfolio).when(portfolioService).save(any(Portfolio.class));
-
-            // Создаем новый портфель
-            Portfolio portfolioToSave = new Portfolio(chatId);
-            portfolioToSave.setCryptoCurrency(crypto);
-            portfolioToSave.setCount(amount);
-            
-            // Выполняем тестируемый метод напрямую
-            Portfolio saved = portfolioService.save(portfolioToSave);
-            
-            // Проверяем результат
-            assertNotNull("Сохраненный портфель не должен быть null", saved);
-            assertEquals("ID должен быть установлен", TEST_PORTFOLIO_ID, saved.getId());
-            assertEquals("ChatID должен совпадать", chatId, saved.getChatId());
-            assertEquals("Криптовалюта должна быть ETH", crypto, saved.getCryptoCurrency());
-            assertEquals("Количество должно быть 5.0", amount, saved.getCount());
-            
-            // Проверяем вызов метода сохранения
-            verify(portfolioService, times(1)).save(any(Portfolio.class));
-        } catch (Exception e) {
-            fail("Тест завершился с ошибкой: " + e.getMessage());
-        }
-    }
-    
-    /**
-     * Тест метода deletePortfolio - удаление портфеля
+     * Тест метода deletePortfolio
      */
     @Test
     public void testDeletePortfolio() {
-        try {
-            // Настройка мока для удаления портфеля
-            doNothing().when(portfolioService).deleteById(TEST_PORTFOLIO_ID);
+        // Подготовка тестовых данных
+        doNothing().when(portfolioService).deletePortfolio(TEST_PORTFOLIO_ID);
             
-            // Удаляем портфель
-            portfolioService.deleteById(TEST_PORTFOLIO_ID);
+        // Выполнение теста
+        portfolioService.deletePortfolio(TEST_PORTFOLIO_ID);
             
-            // Проверяем вызовы
-            verify(portfolioService).deleteById(TEST_PORTFOLIO_ID);
-        } catch (Exception e) {
-            fail("Тест завершился с ошибкой: " + e.getMessage());
-        }
-    }
-    
-    // Вспомогательный метод для установки приватных полей через рефлексию
-    private void setPrivateField(Object target, String fieldName, Object value) throws Exception {
-        java.lang.reflect.Field field = target.getClass().getDeclaredField(fieldName);
-        field.setAccessible(true);
-        field.set(target, value);
+        // Проверка вызовов
+        verify(portfolioService).deletePortfolio(TEST_PORTFOLIO_ID);
     }
 } 

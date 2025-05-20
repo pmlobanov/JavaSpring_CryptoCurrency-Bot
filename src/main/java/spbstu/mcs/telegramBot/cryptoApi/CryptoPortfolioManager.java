@@ -7,25 +7,20 @@ import reactor.core.publisher.Flux;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.util.Optional;
 import java.util.List;
-import java.util.AbstractMap;
 import java.util.Map;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
+
 import java.util.stream.Collectors;
-import java.time.Duration;
 
 import spbstu.mcs.telegramBot.model.Currency.Crypto;
 import spbstu.mcs.telegramBot.model.Currency.Fiat;
 import spbstu.mcs.telegramBot.model.Portfolio;
 import spbstu.mcs.telegramBot.DB.services.PortfolioService;
 import spbstu.mcs.telegramBot.model.Currency;
+import spbstu.mcs.telegramBot.DB.services.UserService;
 
 /**
  * Сервис для управления криптовалютным портфелем пользователя.
@@ -42,17 +37,20 @@ public class CryptoPortfolioManager {
     private final CurrencyConverter currencyConverter;
     private final PriceFetcher priceFetcher;
     private final PortfolioService portfolioService;
+    private final UserService userService;
     private Portfolio currentPortfolio;
     
     @Autowired
     public CryptoPortfolioManager(ObjectMapper objectMapper,
                              CurrencyConverter currencyConverter,
                              PriceFetcher priceFetcher,
-                             PortfolioService portfolioService) {
+                             PortfolioService portfolioService,
+                             UserService userService) {
         this.objectMapper = objectMapper;
         this.currencyConverter = currencyConverter;
         this.priceFetcher = priceFetcher;
         this.portfolioService = portfolioService;
+        this.userService = userService;
     }
     
     private record PortfolioPriceInfo(
@@ -72,47 +70,55 @@ public class CryptoPortfolioManager {
      * @return Mono<String> JSON с информацией об обновленном активе
      */
     public Mono<String> add(Crypto crypto, BigDecimal count) {
-        Fiat currentFiat = Fiat.getCurrentFiat();
-        return currencyConverter.getUsdToFiatRate(currentFiat)
-                .flatMap(exchangeRate -> 
-                    priceFetcher.getCurrentPrice(crypto)
-                        .flatMap(priceJson -> {
-                            try {
-                                JsonNode jsonNode = objectMapper.readTree(priceJson);
-                                BigDecimal priceInUSDT = new BigDecimal(jsonNode.get("price").asText());
-                                long timestamp = jsonNode.get("timestamp").asLong();
-                                
-                                String displaySymbol = crypto.getCode() + "-" + currentFiat.getCode();
-                                
-                                currentPortfolio = portfolioService.addCryptoToPortfolio(
-                                    currentPortfolio.getId(), crypto, count);
-                                
-                                log.info("Added {} {} to portfolio. Stored price in USDT: {}. Total count: {}", 
-                                        count, crypto.getCode(), priceInUSDT, 
-                                        currentPortfolio.getCount());
-                                
-                                BigDecimal displayPrice;
-                                if (currentFiat != Fiat.USD) {
-                                    displayPrice = priceInUSDT.multiply(exchangeRate).setScale(2, RoundingMode.HALF_UP);
-                                } else {
-                                    displayPrice = priceInUSDT;
+        return userService.getUserByChatId(currentPortfolio.getChatId())
+            .flatMap(user -> {
+                Fiat userFiat = Fiat.valueOf(user.getCurrentFiat());
+                return currencyConverter.getUsdToFiatRate(userFiat)
+                    .flatMap(exchangeRate -> 
+                        priceFetcher.getCurrentPrice(crypto)
+                            .flatMap(priceJson -> {
+                                try {
+                                    JsonNode jsonNode = objectMapper.readTree(priceJson);
+                                    BigDecimal priceInUSDT = new BigDecimal(jsonNode.get("price").asText());
+                                    long timestamp = jsonNode.get("timestamp").asLong();
+                                    
+                                    String displaySymbol = crypto.getCode() + "-" + userFiat.getCode();
+                                    
+                                    currentPortfolio = portfolioService.addCryptoToPortfolio(
+                                        currentPortfolio.getId(), crypto, count);
+                                    
+                                    // Обновляем цену и время в базе данных
+                                    currentPortfolio.setLastCryptoPrice(priceInUSDT);
+                                    currentPortfolio.setLastCryptoPriceTimestamp(timestamp);
+                                    portfolioService.save(currentPortfolio);
+                                    
+                                    log.info("Added {} {} to portfolio. Stored price in USDT: {}. Total count: {}", 
+                                            count, crypto.getCode(), priceInUSDT, 
+                                            currentPortfolio.getCount());
+                                    
+                                    BigDecimal displayPrice;
+                                    if (userFiat != Fiat.USD) {
+                                        displayPrice = priceInUSDT.multiply(exchangeRate).setScale(2, RoundingMode.HALF_UP);
+                                    } else {
+                                        displayPrice = priceInUSDT;
+                                    }
+                                    
+                                    BigDecimal assetValue = count.multiply(displayPrice).setScale(2, RoundingMode.HALF_UP);
+                                    
+                                    ObjectNode result = objectMapper.createObjectNode();
+                                    result.put("symbol", displaySymbol);
+                                    result.put("count", count.toString());
+                                    result.put("price", displayPrice.toString());
+                                    result.put("value", assetValue.toString());
+                                    result.put("timestamp", timestamp);
+                                    
+                                    return Mono.just(objectMapper.writeValueAsString(result));
+                                } catch (Exception e) {
+                                    return Mono.error(new RuntimeException("Error processing portfolio addition: " + e.getMessage()));
                                 }
-                                
-                                BigDecimal assetValue = count.multiply(displayPrice).setScale(2, RoundingMode.HALF_UP);
-                                
-                                ObjectNode result = objectMapper.createObjectNode();
-                                result.put("symbol", displaySymbol);
-                                result.put("count", count.toString());
-                                result.put("price", displayPrice.toString());
-                                result.put("value", assetValue.toString());
-                                result.put("timestamp", timestamp);
-                                
-                                return Mono.just(objectMapper.writeValueAsString(result));
-                            } catch (Exception e) {
-                                return Mono.error(new RuntimeException("Error processing portfolio addition: " + e.getMessage()));
-                            }
-                        })
-                );
+                            })
+                    );
+            });
     }
     
     /**
@@ -145,50 +151,58 @@ public class CryptoPortfolioManager {
             });
         }
         
-        Fiat currentFiat = Fiat.getCurrentFiat();
-        return currencyConverter.getUsdToFiatRate(currentFiat)
-                .flatMap(exchangeRate -> 
-                    priceFetcher.getCurrentPrice(crypto)
-                        .flatMap(priceJson -> Mono.fromCallable(() -> {
-                            try {
-                                JsonNode jsonNode = objectMapper.readTree(priceJson);
-                                BigDecimal priceInUSDT = new BigDecimal(jsonNode.get("price").asText());
-                                long timestamp = jsonNode.get("timestamp").asLong();
-                                
-                                currentPortfolio = portfolioService.removeCryptoFromPortfolio(
-                                    currentPortfolio.getId(), crypto, count);
-                                
-                                log.info("Removed {} {} from portfolio. Remaining: {}, New price: {} USDT", 
-                                        count, crypto.getCode(), 
-                                        currentPortfolio.getCount(), 
-                                        priceInUSDT);
-                                
-                                String displaySymbol = crypto.getCode() + "-" + currentFiat.getCode();
-                                
-                                BigDecimal displayPrice;
-                                if (currentFiat != Fiat.USD) {
-                                    displayPrice = priceInUSDT.multiply(exchangeRate).setScale(2, RoundingMode.HALF_UP);
-                                } else {
-                                    displayPrice = priceInUSDT;
+        return userService.getUserByChatId(currentPortfolio.getChatId())
+            .flatMap(user -> {
+                Fiat userFiat = Fiat.valueOf(user.getCurrentFiat());
+                return currencyConverter.getUsdToFiatRate(userFiat)
+                    .flatMap(exchangeRate -> 
+                        priceFetcher.getCurrentPrice(crypto)
+                            .flatMap(priceJson -> Mono.fromCallable(() -> {
+                                try {
+                                    JsonNode jsonNode = objectMapper.readTree(priceJson);
+                                    BigDecimal priceInUSDT = new BigDecimal(jsonNode.get("price").asText());
+                                    long timestamp = jsonNode.get("timestamp").asLong();
+                                    
+                                    currentPortfolio = portfolioService.removeCryptoFromPortfolio(
+                                        currentPortfolio.getId(), crypto, count);
+                                    
+                                    // Обновляем цену и время в базе данных
+                                    currentPortfolio.setLastCryptoPrice(priceInUSDT);
+                                    currentPortfolio.setLastCryptoPriceTimestamp(timestamp);
+                                    portfolioService.save(currentPortfolio);
+                                    
+                                    log.info("Removed {} {} from portfolio. Remaining: {}, New price: {} USDT", 
+                                            count, crypto.getCode(), 
+                                            currentPortfolio.getCount(), 
+                                            priceInUSDT);
+                                    
+                                    String displaySymbol = crypto.getCode() + "-" + userFiat.getCode();
+                                    
+                                    BigDecimal displayPrice;
+                                    if (userFiat != Fiat.USD) {
+                                        displayPrice = priceInUSDT.multiply(exchangeRate).setScale(2, RoundingMode.HALF_UP);
+                                    } else {
+                                        displayPrice = priceInUSDT;
+                                    }
+                                    
+                                    BigDecimal newCount = currentPortfolio.getCount();
+                                    BigDecimal assetValue = newCount.multiply(displayPrice).setScale(2, RoundingMode.HALF_UP);
+                                    
+                                    ObjectNode result = objectMapper.createObjectNode();
+                                    result.put("status", "success");
+                                    result.put("symbol", displaySymbol);
+                                    result.put("count", newCount.toString());
+                                    result.put("price", displayPrice.toString());
+                                    result.put("value", assetValue.toString());
+                                    result.put("timestamp", timestamp);
+                                    
+                                    return objectMapper.writeValueAsString(result);
+                                } catch (Exception e) {
+                                    throw new RuntimeException("Error processing portfolio removal: " + e.getMessage());
                                 }
-                                
-                                BigDecimal newCount = currentPortfolio.getCount();
-                                BigDecimal assetValue = newCount.multiply(displayPrice).setScale(2, RoundingMode.HALF_UP);
-                                
-                                ObjectNode result = objectMapper.createObjectNode();
-                                result.put("status", "success");
-                                result.put("symbol", displaySymbol);
-                                result.put("count", newCount.toString());
-                                result.put("price", displayPrice.toString());
-                                result.put("value", assetValue.toString());
-                                result.put("timestamp", timestamp);
-                                
-                                return objectMapper.writeValueAsString(result);
-                            } catch (Exception e) {
-                                throw new RuntimeException("Error processing portfolio removal: " + e.getMessage());
-                            }
-                        }))
-                );
+                            }))
+                    );
+            });
     }
     
     /**
@@ -199,56 +213,59 @@ public class CryptoPortfolioManager {
      * @return Mono<String> Информация о портфеле
      */
     public Mono<String> getPortfolioInfo(String chatId) {
-        return Mono.fromCallable(() -> {
-            List<Portfolio> portfolios = portfolioService.getPortfoliosByChatId(chatId);
-            if (portfolios.isEmpty()) {
-                return Mono.just("У вас пока нет портфеля. Используйте команду /add для создания портфеля и добавления криптовалюты.");
-            }
-
-            StringBuilder result = new StringBuilder();
-            result.append(String.format("👜 Портфель (%d активов):\n", portfolios.size()));
-            
-            return Flux.fromIterable(portfolios)
-                .filter(portfolio -> portfolio.getCryptoCurrency() != null && portfolio.getCount().compareTo(BigDecimal.ZERO) > 0)
-                .flatMap(portfolio -> {
-                    String cryptoCode = portfolio.getCryptoCurrency().getCode();
-                    BigDecimal amount = portfolio.getCount().setScale(6, RoundingMode.FLOOR);
-                    
-                    return Mono.zip(
-                        priceFetcher.getCurrentPrice(portfolio.getCryptoCurrency()),
-                        currencyConverter.getUsdToFiatRate(spbstu.mcs.telegramBot.model.Currency.Fiat.getCurrentFiat())
-                    ).map(tuple -> {
-                        try {
-                            JsonNode priceNode = objectMapper.readTree(tuple.getT1());
-                            BigDecimal priceUSD = new BigDecimal(priceNode.get("price").asText());
-                            BigDecimal conversionRate = tuple.getT2();
-                            
-                            BigDecimal priceInFiat = priceUSD.multiply(conversionRate).setScale(2, RoundingMode.HALF_UP);
-                            BigDecimal valueInFiat = amount.multiply(priceInFiat).setScale(2, RoundingMode.HALF_UP);
-                            
-                            return new AbstractMap.SimpleEntry<>(valueInFiat, 
-                                String.format("• %.6f %s (%.2f %s)\n", 
-                                    amount, cryptoCode, valueInFiat, 
-                                    spbstu.mcs.telegramBot.model.Currency.Fiat.getCurrentFiat().getCode()));
-                        } catch (Exception e) {
-                            return new AbstractMap.SimpleEntry<>(BigDecimal.ZERO, "");
-                        }
-                    });
-                })
-                .collectList()
-                .map(portfolioEntries -> {
-                    BigDecimal totalValue = BigDecimal.ZERO;
-                    for (Map.Entry<BigDecimal, String> entry : portfolioEntries) {
-                        totalValue = totalValue.add(entry.getKey());
-                        result.append(entry.getValue());
+        return userService.getUserByChatId(chatId)
+            .flatMap(user -> {
+                Fiat userFiat = Fiat.valueOf(user.getCurrentFiat());
+                return Mono.fromCallable(() -> {
+                    List<Portfolio> portfolios = portfolioService.getPortfoliosByChatId(chatId);
+                    if (portfolios.isEmpty()) {
+                        return Mono.just("Ваш портфель пока пуст. Используйте команду /add для добавления криптовалюты.");
                     }
+
+                    StringBuilder result = new StringBuilder();
+                    result.append(String.format("👜 Портфель (%d активов):\n", portfolios.size()));
                     
-                    result.append(String.format("\n💼 Итого: %.2f %s", 
-                        totalValue, spbstu.mcs.telegramBot.model.Currency.Fiat.getCurrentFiat().getCode()));
-                    
-                    return result.toString();
-                });
-        }).flatMap(mono -> mono);
+                    return Flux.fromIterable(portfolios)
+                        .filter(portfolio -> portfolio.getCryptoCurrency() != null && portfolio.getCount().compareTo(BigDecimal.ZERO) > 0)
+                        .flatMap(portfolio -> {
+                            String cryptoCode = portfolio.getCryptoCurrency().getCode();
+                            BigDecimal amount = portfolio.getCount().setScale(6, RoundingMode.FLOOR);
+                            
+                            return Mono.zip(
+                                priceFetcher.getCurrentPrice(portfolio.getCryptoCurrency()),
+                                currencyConverter.getUsdToFiatRate(userFiat)
+                            ).map(tuple -> {
+                                try {
+                                    JsonNode priceNode = objectMapper.readTree(tuple.getT1());
+                                    BigDecimal priceUSD = new BigDecimal(priceNode.get("price").asText());
+                                    BigDecimal conversionRate = tuple.getT2();
+                                    
+                                    BigDecimal priceInFiat = priceUSD.multiply(conversionRate).setScale(2, RoundingMode.HALF_UP);
+                                    BigDecimal valueInFiat = amount.multiply(priceInFiat).setScale(2, RoundingMode.HALF_UP);
+                                    
+                                    return Map.entry(valueInFiat, 
+                                        String.format("• %.6f %s (%.2f %s)\n", 
+                                            amount, cryptoCode, valueInFiat, userFiat.getCode()));
+                                } catch (Exception e) {
+                                    return Map.entry(BigDecimal.ZERO, "");
+                                }
+                            });
+                        })
+                        .collectList()
+                        .map(portfolioEntries -> {
+                            BigDecimal totalValue = BigDecimal.ZERO;
+                            for (Map.Entry<BigDecimal, String> entry : portfolioEntries) {
+                                totalValue = totalValue.add(entry.getKey());
+                                result.append(entry.getValue());
+                            }
+                            
+                            result.append(String.format("\n💼 Итого: %.2f %s", 
+                                totalValue, userFiat.getCode()));
+                            
+                            return result.toString();
+                        });
+                }).flatMap(mono -> mono);
+            });
     }
 
     private String formatTimeSinceUpdate(long timestamp) {
@@ -281,166 +298,89 @@ public class CryptoPortfolioManager {
      * @return Mono<String> Информация о ценах активов
      */
     public Mono<String> getAssetsPrice(String chatId) {
-        return Mono.just(portfolioService.getPortfoliosByChatId(chatId))
-            .map(portfolios -> portfolios.stream()
-                .filter(portfolio -> portfolio.getCryptoCurrency() != null)
-                .collect(Collectors.toList()))
-            .flatMap(portfolios -> {
-                if (portfolios.isEmpty()) {
-                    return Mono.just("❌ У вас нет активов в портфеле. Используйте команду /add для добавления криптовалюты.");
-                }
-
-                return Mono.zip(
-                    Flux.fromIterable(portfolios)
-                        .flatMap(portfolio -> {
-                            Currency.Crypto crypto = portfolio.getCryptoCurrency();
-                            BigDecimal previousPriceUSD = portfolio.getLastCryptoPrice();
-                            long previousTimestamp = portfolio.getLastCryptoPriceTimestamp();
-                            
-                            // Проверяем наличие предыдущей цены
-                            if (previousPriceUSD == null || previousPriceUSD.compareTo(BigDecimal.ZERO) <= 0) {
-                                log.warn("No previous price found for {} in portfolio", crypto.getCode());
-                            }
-                            
-                            return Mono.zip(
-                                priceFetcher.getCurrentPrice(crypto),
-                                currencyConverter.getUsdToFiatRate(Currency.Fiat.getCurrentFiat())
-                            ).flatMap(tuple -> {
-                                try {
-                                    JsonNode node = objectMapper.readTree(tuple.getT1());
-                                    BigDecimal currentPriceUSD = new BigDecimal(node.get("price").asText());
-                                    BigDecimal conversionRate = tuple.getT2();
-                                    
-                                    // Проверяем корректность текущей цены
-                                    if (currentPriceUSD.compareTo(BigDecimal.ZERO) <= 0) {
-                                        log.error("Invalid current price for {}: {}", crypto.getCode(), currentPriceUSD);
-                                        return Mono.error(new RuntimeException("Invalid price received from API"));
-                                    }
-                                    
-                                    // Конвертируем цены в текущую фиатную валюту
-                                    BigDecimal currentPrice = currentPriceUSD.multiply(conversionRate)
-                                        .setScale(2, RoundingMode.HALF_UP);
-                                    BigDecimal previousPrice = previousPriceUSD != null && previousPriceUSD.compareTo(BigDecimal.ZERO) > 0
-                                        ? previousPriceUSD.multiply(conversionRate).setScale(2, RoundingMode.HALF_UP)
-                                        : currentPrice;
-                                    
-                                    // Рассчитываем изменение цены
-                                    BigDecimal priceChange = currentPrice.subtract(previousPrice);
-                                    BigDecimal priceChangePercent = previousPrice.compareTo(BigDecimal.ZERO) > 0
-                                        ? priceChange.divide(previousPrice, 4, RoundingMode.HALF_UP)
-                                            .multiply(new BigDecimal("100"))
-                                            .setScale(2, RoundingMode.HALF_UP)
-                                        : BigDecimal.ZERO;
-                                    
-                                    // Создаем объект с информацией о ценах
-                                    PortfolioPriceInfo priceInfo = new PortfolioPriceInfo(
-                                        crypto,
-                                        portfolio.getCount(),
-                                        currentPrice,
-                                        previousPrice,
-                                        previousTimestamp
-                                    );
-                                    
-                                    // Обновляем последнюю цену в USD после всех расчетов
-                                    portfolio.setLastCryptoPrice(currentPriceUSD);
-                                    portfolio.setLastCryptoPriceTimestamp(System.currentTimeMillis() / 1000);
-                                    portfolioService.save(portfolio);
-                                    
-                                    return Mono.just(priceInfo);
-                                } catch (Exception e) {
-                                    log.error("Error processing price data for {}: {}", crypto.getCode(), e.getMessage());
-                                    return Mono.error(e);
-                                }
-                            });
-                        })
-                        .collectList(),
-                    currencyConverter.getUsdToFiatRate(Currency.Fiat.getCurrentFiat())
-                ).map(tuple -> {
-                    List<PortfolioPriceInfo> priceInfos = tuple.getT1();
-                    BigDecimal conversionRate = tuple.getT2();
-                    String fiatCode = Currency.Fiat.getCurrentFiat().getCode();
-                    
-                    // Рассчитываем общую стоимость портфеля
-                    BigDecimal totalCurrentValue = priceInfos.stream()
-                        .map(info -> info.currentPrice().multiply(info.count()))
-                        .reduce(BigDecimal.ZERO, BigDecimal::add)
-                        .setScale(2, RoundingMode.HALF_UP);
-                    
-                    BigDecimal totalPreviousValue = priceInfos.stream()
-                        .map(info -> info.previousPrice().multiply(info.count()))
-                        .reduce(BigDecimal.ZERO, BigDecimal::add)
-                        .setScale(2, RoundingMode.HALF_UP);
-                    
-                    // Рассчитываем общее изменение
-                    BigDecimal totalChange = totalCurrentValue.subtract(totalPreviousValue);
-                    BigDecimal totalChangePercent = totalPreviousValue.compareTo(BigDecimal.ZERO) > 0
-                        ? totalChange.divide(totalPreviousValue, 4, RoundingMode.HALF_UP)
-                            .multiply(new BigDecimal("100"))
-                            .setScale(2, RoundingMode.HALF_UP)
-                        : BigDecimal.ZERO;
-                    
-                    // Форматируем сообщение
-                    StringBuilder message = new StringBuilder();
-                    message.append(String.format("💼 Цена вашего портфеля: %.2f %s\n", 
-                        totalCurrentValue, fiatCode));
-                    message.append(String.format("📊 Предыдущая цена портфеля: %.2f %s\n", 
-                        totalPreviousValue, fiatCode));
-                    
-                    String changeSign = totalChangePercent.compareTo(BigDecimal.ZERO) >= 0 ? "+" : "";
-                    message.append(String.format("📈 Динамика изменения: %s%.2f%% (%s%.2f %s)\n\n", 
-                        changeSign, totalChangePercent,
-                        totalChange.compareTo(BigDecimal.ZERO) >= 0 ? "+" : "",
-                        totalChange, fiatCode));
-                    
-                    message.append("Активы в портфеле:\n");
-                    
-                    for (PortfolioPriceInfo info : priceInfos) {
-                        BigDecimal assetCurrentValue = info.currentPrice().multiply(info.count())
-                            .setScale(2, RoundingMode.HALF_UP);
-                        BigDecimal assetPreviousValue = info.previousPrice().multiply(info.count())
-                            .setScale(2, RoundingMode.HALF_UP);
-                        BigDecimal assetChange = assetCurrentValue.subtract(assetPreviousValue);
-                        BigDecimal assetChangePercent = assetPreviousValue.compareTo(BigDecimal.ZERO) > 0
-                            ? assetChange.divide(assetPreviousValue, 4, RoundingMode.HALF_UP)
-                                .multiply(new BigDecimal("100"))
-                                .setScale(2, RoundingMode.HALF_UP)
-                            : BigDecimal.ZERO;
-                        
-                        String assetChangeSign = assetChangePercent.compareTo(BigDecimal.ZERO) >= 0 ? "+" : "";
-                        
-                        message.append(String.format("• %.6f %s (%.2f %s): 📈 %s%.2f%% (%s%.2f %s)\n",
-                            info.count().setScale(6, RoundingMode.FLOOR), info.crypto().getCode(),
-                            assetCurrentValue, fiatCode,
-                            assetChangeSign, assetChangePercent,
-                            assetChange.compareTo(BigDecimal.ZERO) >= 0 ? "+" : "",
-                            assetChange, fiatCode));
-                        
-                        message.append(String.format("  Предыдущая цена: %.2f %s\n",
-                            info.previousPrice().multiply(info.count()), fiatCode));
-                        
-                        if (info.previousTimestamp() > 0) {
-                            long currentTime = System.currentTimeMillis() / 1000;
-                            long duration = currentTime - info.previousTimestamp();
-                            long minutes = duration / 60;
-                            long seconds = duration % 60;
-                            message.append(String.format("  С последнего обновления: %d мин. %d сек.\n",
-                                minutes, seconds));
+        return userService.getUserByChatId(chatId)
+            .flatMap(user -> {
+                Fiat userFiat = Fiat.valueOf(user.getCurrentFiat());
+                return Mono.just(portfolioService.getPortfoliosByChatId(chatId))
+                    .map(portfolios -> portfolios.stream()
+                        .filter(portfolio -> portfolio.getCryptoCurrency() != null)
+                        .collect(Collectors.toList()))
+                    .flatMap(portfolios -> {
+                        if (portfolios.isEmpty()) {
+                            return Mono.just("❌ У вас нет активов в портфеле");
                         }
-                        message.append("\n");
-                    }
-                    
-                    // Добавляем текущее время
-                    java.time.ZonedDateTime now = java.time.ZonedDateTime.now(
-                        java.time.ZoneId.of("Europe/Moscow"));
-                    message.append(String.format("⏰ Текущее время: %s\n",
-                        now.format(java.time.format.DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss"))));
-                    
-                    return message.toString();
-                });
-            })
-            .onErrorResume(e -> {
-                log.error("Error getting assets price", e);
-                return Mono.just("❌ Ошибка при получении цен активов: " + e.getMessage());
+
+                        return Mono.zip(
+                            Flux.fromIterable(portfolios)
+                                .flatMap(portfolio -> priceFetcher.getCurrentPrice(portfolio.getCryptoCurrency())
+                                    .<Map.Entry<Portfolio, PortfolioPriceInfo>>map(priceJson -> {
+                                        try {
+                                            JsonNode node = objectMapper.readTree(priceJson);
+                                            BigDecimal currentPrice = new BigDecimal(node.get("price").asText());
+                                            long timestamp = node.get("timestamp").asLong();
+                                            
+                                            return Map.entry(portfolio, new PortfolioPriceInfo(
+                                                portfolio.getCryptoCurrency(),
+                                                portfolio.getCount(),
+                                                currentPrice,
+                                                portfolio.getLastCryptoPrice(),
+                                                portfolio.getLastCryptoPriceTimestamp()
+                                            ));
+                                        } catch (Exception e) {
+                                            log.error("Error parsing price JSON", e);
+                                            return Map.entry(portfolio, null);
+                                        }
+                                    }))
+                                .collectList(),
+                            currencyConverter.getUsdToFiatRate(userFiat)
+                        ).map(tuple -> {
+                            List<Map.Entry<Portfolio, PortfolioPriceInfo>> portfolioPrices = tuple.getT1();
+                            BigDecimal exchangeRate = tuple.getT2();
+
+                            StringBuilder response = new StringBuilder();
+                            response.append("💼 Активы в портфеле:\n\n");
+
+                            for (Map.Entry<Portfolio, PortfolioPriceInfo> entry : portfolioPrices) {
+                                Portfolio portfolio = entry.getKey();
+                                PortfolioPriceInfo priceInfo = entry.getValue();
+                                if (priceInfo == null) continue;
+
+                                BigDecimal currentPriceUSD = priceInfo.currentPrice();
+                                BigDecimal currentPrice = currentPriceUSD.multiply(exchangeRate)
+                                    .setScale(2, RoundingMode.HALF_UP);
+                                BigDecimal previousPrice = priceInfo.previousPrice() != null
+                                    ? priceInfo.previousPrice().multiply(exchangeRate)
+                                        .setScale(2, RoundingMode.HALF_UP)
+                                    : currentPrice;
+
+                                BigDecimal portfolioValue = currentPrice.multiply(priceInfo.count())
+                                    .setScale(2, RoundingMode.HALF_UP);
+                                BigDecimal previousValue = previousPrice.multiply(priceInfo.count())
+                                    .setScale(2, RoundingMode.HALF_UP);
+
+                                BigDecimal change = portfolioValue.subtract(previousValue);
+                                BigDecimal changePercent = previousValue.compareTo(BigDecimal.ZERO) != 0
+                                    ? change.divide(previousValue, 6, RoundingMode.HALF_UP)
+                                        .multiply(new BigDecimal("100"))
+                                    : BigDecimal.ZERO;
+
+                                String changeSign = changePercent.compareTo(BigDecimal.ZERO) >= 0 ? "+" : "";
+                                String changeEmoji = changePercent.compareTo(BigDecimal.ZERO) >= 0 ? "📈" : "📉";
+                                
+                                response.append(String.format("💰 %s (%s)\n", 
+                                    portfolio.getCryptoCurrency().getCode(), 
+                                    portfolio.getCryptoCurrency().getName()));
+                                response.append(String.format("   • Сейчас: %.2f %s\n", 
+                                    portfolioValue, userFiat.getCode()));
+                                response.append(String.format("   • Было: %.2f %s\n", 
+                                    previousValue, userFiat.getCode()));
+                                response.append(String.format("   %s Изменение: %s%.4f%% (%.2f %s)\n\n",
+                                    changeEmoji, changeSign, changePercent, change, userFiat.getCode()));
+                            }
+
+                            return response.toString();
+                        });
+                    });
             });
     }
 
@@ -452,127 +392,132 @@ public class CryptoPortfolioManager {
      * @return Mono<String> Информация о стоимости портфеля
      */
     public Mono<String> getPortfolioPriceInfo(String chatId) {
-        return Mono.fromCallable(() -> portfolioService.getPortfoliosByChatId(chatId))
-            .flatMap(portfolios -> {
-                if (portfolios.isEmpty()) {
-                    return Mono.just("❌ У вас нет активов в портфеле. Используйте команду /add для добавления криптовалюты.");
-                }
-
-                return Flux.fromIterable(portfolios)
-                    .filter(portfolio -> portfolio.getCryptoCurrency() != null && portfolio.getCount().compareTo(BigDecimal.ZERO) > 0)
-                    .flatMap(portfolio -> 
-                        Mono.zip(
-                            priceFetcher.getCurrentPrice(portfolio.getCryptoCurrency()),
-                            currencyConverter.getUsdToFiatRate(spbstu.mcs.telegramBot.model.Currency.Fiat.getCurrentFiat())
-                                .<BigDecimal>onErrorResume(e -> {
-                                    // Если текущая валюта USD, возвращаем 1.0
-                                    if (spbstu.mcs.telegramBot.model.Currency.Fiat.getCurrentFiat() == spbstu.mcs.telegramBot.model.Currency.Fiat.USD) {
-                                        return Mono.just(BigDecimal.ONE);
-                                    }
-                                    return Mono.error(e);
-                                })
-                        ).map(tuple -> {
-                            try {
-                                JsonNode priceNode = objectMapper.readTree(tuple.getT1());
-                                BigDecimal currentPriceUSD = new BigDecimal(priceNode.get("price").asText());
-                                BigDecimal conversionRate = tuple.getT2();
-                                
-                                // Проверяем корректность текущей цены
-                                if (currentPriceUSD.compareTo(BigDecimal.ZERO) <= 0) {
-                                    log.error("Invalid current price for {}: {}", 
-                                        portfolio.getCryptoCurrency().getCode(), currentPriceUSD);
-                                    throw new RuntimeException("Invalid price received from API");
-                                }
-                                
-                                // Сохраняем предыдущую цену перед обновлением
-                                BigDecimal previousPrice = portfolio.getLastCryptoPrice();
-                                long previousTimestamp = portfolio.getLastCryptoPriceTimestamp();
-                                
-                                // Проверяем наличие предыдущей цены
-                                if (previousPrice == null || previousPrice.compareTo(BigDecimal.ZERO) <= 0) {
-                                    log.warn("No previous price found for {} in portfolio", 
-                                        portfolio.getCryptoCurrency().getCode());
-                                }
-                                
-                                // Рассчитываем текущую стоимость
-                                BigDecimal currentPriceInFiat = currentPriceUSD.multiply(conversionRate);
-                                BigDecimal currentValue = portfolio.getCount().multiply(currentPriceInFiat);
-                                
-                                // Рассчитываем стоимость по предыдущей цене
-                                BigDecimal previousValue = BigDecimal.ZERO;
-                                if (previousPrice != null && previousPrice.compareTo(BigDecimal.ZERO) > 0) {
-                                    BigDecimal previousPriceInFiat = previousPrice.multiply(conversionRate);
-                                    previousValue = portfolio.getCount().multiply(previousPriceInFiat);
-                                }
-                                
-                                // Обновляем цену в портфеле после всех расчетов
-                                portfolio.setLastCryptoPrice(currentPriceUSD);
-                                portfolio.setLastCryptoPriceTimestamp(System.currentTimeMillis() / 1000);
-                                portfolioService.save(portfolio);
-                                
-                                return new AbstractMap.SimpleEntry<BigDecimal, AbstractMap.SimpleEntry<BigDecimal, Long>>(
-                                    currentValue, 
-                                    new AbstractMap.SimpleEntry<>(previousValue, previousTimestamp)
-                                );
-                            } catch (Exception e) {
-                                log.error("Error processing price data for {}: {}", 
-                                    portfolio.getCryptoCurrency().getCode(), e.getMessage());
-                                return new AbstractMap.SimpleEntry<BigDecimal, AbstractMap.SimpleEntry<BigDecimal, Long>>(
-                                    BigDecimal.ZERO,
-                                    new AbstractMap.SimpleEntry<>(BigDecimal.ZERO, 0L)
-                                );
-                            }
-                        })
-                    )
-                    .collectList()
-                    .map(portfolioEntries -> {
-                        StringBuilder result = new StringBuilder();
-                        BigDecimal totalCurrentValue = BigDecimal.ZERO;
-                        BigDecimal totalPreviousValue = BigDecimal.ZERO;
-                        long latestTimestamp = 0;
-                        
-                        for (Map.Entry<BigDecimal, AbstractMap.SimpleEntry<BigDecimal, Long>> entry : portfolioEntries) {
-                            totalCurrentValue = totalCurrentValue.add(entry.getKey());
-                            totalPreviousValue = totalPreviousValue.add(entry.getValue().getKey());
-                            latestTimestamp = Math.max(latestTimestamp, entry.getValue().getValue());
+        return userService.getUserByChatId(chatId)
+            .flatMap(user -> {
+                Fiat userFiat = Fiat.valueOf(user.getCurrentFiat());
+                return Mono.just(portfolioService.getPortfoliosByChatId(chatId))
+                    .map(portfolios -> portfolios.stream()
+                        .filter(portfolio -> portfolio.getCryptoCurrency() != null)
+                        .collect(Collectors.toList()))
+                    .flatMap(portfolios -> {
+                        if (portfolios.isEmpty()) {
+                            return Mono.just("❌ У вас нет активов в портфеле");
                         }
-                        
-                        // Рассчитываем общее изменение
-                        BigDecimal changeValue = totalCurrentValue.subtract(totalPreviousValue);
-                        BigDecimal changePercent = totalPreviousValue.compareTo(BigDecimal.ZERO) > 0
-                            ? changeValue.divide(totalPreviousValue, 4, RoundingMode.HALF_UP)
-                                .multiply(new BigDecimal("100"))
-                                .setScale(2, RoundingMode.HALF_UP)
-                            : BigDecimal.ZERO;
-                        
-                        String fiatCode = spbstu.mcs.telegramBot.model.Currency.Fiat.getCurrentFiat().getCode();
-                        String changeSign = changePercent.compareTo(BigDecimal.ZERO) >= 0 ? "+" : "";
-                        String valueChangeSign = changeValue.compareTo(BigDecimal.ZERO) >= 0 ? "+" : "";
-                        String changeEmoji = changePercent.compareTo(BigDecimal.ZERO) >= 0 ? "📈" : "📉";
-                        
-                        // Форматируем текущее время
-                        java.time.ZonedDateTime now = java.time.ZonedDateTime.now(
-                            java.time.ZoneId.of("Europe/Moscow"));
-                        String currentTime = now.format(
-                            java.time.format.DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss"));
-                        
-                        // Форматируем время с последнего обновления
-                        String timeSinceUpdate = formatTimeSinceUpdate(latestTimestamp);
-                        
-                        return String.format("💼 Цена вашего портфеля: %.2f %s\n" +
-                                          "📊 Предыдущая цена портфеля: %.2f %s\n" +
-                                          "%s Динамика изменения: %s%.2f%% (%s%.2f %s)\n\n" +
-                                          "⏰ Текущее время: %s\n" +
-                                          "🕒 С последнего обновления цены прошло: %s",
-                                          totalCurrentValue.doubleValue(), fiatCode,
-                                          totalPreviousValue.doubleValue(), fiatCode,
-                                          changeEmoji, changeSign, 
-                                          changePercent.doubleValue(),
-                                          valueChangeSign, 
-                                          changeValue.abs().doubleValue(), fiatCode,
-                                          currentTime, timeSinceUpdate);
+
+                        return Mono.zip(
+                            Flux.fromIterable(portfolios)
+                                .flatMap(portfolio -> priceFetcher.getCurrentPrice(portfolio.getCryptoCurrency())
+                                    .<Map.Entry<Portfolio, PortfolioPriceInfo>>map(priceJson -> {
+                                        try {
+                                            JsonNode node = objectMapper.readTree(priceJson);
+                                            BigDecimal currentPrice = new BigDecimal(node.get("price").asText());
+                                            long timestamp = node.get("timestamp").asLong();
+                                            
+                                            return Map.entry(portfolio, new PortfolioPriceInfo(
+                                                portfolio.getCryptoCurrency(),
+                                                portfolio.getCount(),
+                                                currentPrice,
+                                                portfolio.getLastCryptoPrice(),
+                                                portfolio.getLastCryptoPriceTimestamp()
+                                            ));
+                                        } catch (Exception e) {
+                                            log.error("Error parsing price JSON", e);
+                                            return Map.entry(portfolio, null);
+                                        }
+                                    }))
+                                .collectList(),
+                            currencyConverter.getUsdToFiatRate(userFiat)
+                        ).map(tuple -> {
+                            List<Map.Entry<Portfolio, PortfolioPriceInfo>> portfolioPrices = tuple.getT1();
+                            BigDecimal exchangeRate = tuple.getT2();
+
+                            BigDecimal totalCurrentPrice = BigDecimal.ZERO;
+                            BigDecimal totalPreviousPrice = BigDecimal.ZERO;
+                            long latestTimestamp = 0;
+
+                            // Сначала вычисляем общую стоимость
+                            for (Map.Entry<Portfolio, PortfolioPriceInfo> entry : portfolioPrices) {
+                                Portfolio portfolio = entry.getKey();
+                                PortfolioPriceInfo priceInfo = entry.getValue();
+                                if (priceInfo == null) continue;
+
+                                BigDecimal currentPriceUSD = priceInfo.currentPrice();
+                                BigDecimal currentPrice = currentPriceUSD.multiply(exchangeRate)
+                                    .setScale(2, RoundingMode.HALF_UP);
+                                BigDecimal previousPrice = priceInfo.previousPrice() != null
+                                    ? priceInfo.previousPrice().multiply(exchangeRate)
+                                        .setScale(2, RoundingMode.HALF_UP)
+                                    : currentPrice;
+
+                                BigDecimal portfolioValue = currentPrice.multiply(priceInfo.count())
+                                    .setScale(2, RoundingMode.HALF_UP);
+                                BigDecimal previousValue = previousPrice.multiply(priceInfo.count())
+                                    .setScale(2, RoundingMode.HALF_UP);
+
+                                totalCurrentPrice = totalCurrentPrice.add(portfolioValue);
+                                totalPreviousPrice = totalPreviousPrice.add(previousValue);
+
+                                // Обновляем время последнего обновления
+                                if (priceInfo.previousTimestamp() > 0) {
+                                    latestTimestamp = Math.max(latestTimestamp, priceInfo.previousTimestamp());
+                                }
+                            }
+
+                            // Вычисляем общее изменение
+                            BigDecimal totalChange = totalCurrentPrice.subtract(totalPreviousPrice);
+                            BigDecimal totalChangePercent = totalPreviousPrice.compareTo(BigDecimal.ZERO) != 0
+                                ? totalChange.divide(totalPreviousPrice, 6, RoundingMode.HALF_UP)
+                                    .multiply(new BigDecimal("100"))
+                                : BigDecimal.ZERO;
+
+                            // Форматируем общий процент с 4 знаками после запятой и правильным знаком
+                            String changeSign = totalChangePercent.compareTo(BigDecimal.ZERO) >= 0 ? "+" : "";
+                            String changeEmoji = totalChangePercent.compareTo(BigDecimal.ZERO) >= 0 ? "📈" : "📉";
+                            
+                            StringBuilder response = new StringBuilder();
+                            response.append(String.format("💰 Общая стоимость портфеля: %.2f %s\n", 
+                                totalCurrentPrice, userFiat.getCode()));
+                            response.append(String.format("📊 Было: %.2f %s\n",
+                                totalPreviousPrice, userFiat.getCode()));
+                            response.append(String.format("%s Изменение: %s%.4f%% (%.2f %s)\n",
+                                changeEmoji, changeSign, totalChangePercent, totalChange, userFiat.getCode()));
+                            response.append(String.format("⏰ Последнее обновление: %s",
+                                formatTimeSinceUpdate(latestTimestamp)));
+
+                            return response.toString();
+                        });
                     });
             });
+    }
+
+    /**
+     * Обновляет цены в базе данных для всех активов пользователя.
+     *
+     * @param chatId ID чата пользователя
+     * @return Mono<Void>
+     */
+    public Mono<Void> updatePortfolioPrices(String chatId) {
+        return Mono.just(portfolioService.getPortfoliosByChatId(chatId))
+            .flatMap(portfolios -> Flux.fromIterable(portfolios)
+                .filter(portfolio -> portfolio.getCryptoCurrency() != null)
+                .flatMap(portfolio -> priceFetcher.getCurrentPrice(portfolio.getCryptoCurrency())
+                    .map(priceJson -> {
+                        try {
+                            JsonNode node = objectMapper.readTree(priceJson);
+                            BigDecimal currentPrice = new BigDecimal(node.get("price").asText());
+                            long timestamp = node.get("timestamp").asLong();
+                            
+                            portfolio.setLastCryptoPrice(currentPrice);
+                            portfolio.setLastCryptoPriceTimestamp(timestamp);
+                            portfolioService.save(portfolio);
+                            
+                            return portfolio;
+                        } catch (Exception e) {
+                            log.error("Error updating portfolio price", e);
+                            return null;
+                        }
+                    }))
+                .then());
     }
 
     /**
@@ -617,10 +562,14 @@ public class CryptoPortfolioManager {
                     return Mono.just("❌ У вас нет портфеля. Используйте команду /add для создания портфеля.");
                 }
 
-                portfolios.forEach(portfolioService::delete);
-                return Mono.just("✅ Все активы успешно удалены из портфеля");
+                return Flux.fromIterable(portfolios)
+                    .flatMap(portfolio -> portfolioService.delete(portfolio))
+                    .then(Mono.just("✅ Все активы успешно удалены из портфеля"));
             })
-            .onErrorResume(e -> Mono.just("❌ Ошибка при удалении активов: " + e.getMessage()));
+            .onErrorResume(e -> {
+                log.error("Error deleting all assets", e);
+                return Mono.just("❌ Ошибка при удалении активов: " + e.getMessage());
+            });
     }
 
     /**

@@ -2,7 +2,6 @@ package spbstu.mcs.telegramBot.model;
 
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
-import spbstu.mcs.telegramBot.model.Currency;
 
 import java.math.BigDecimal;
 

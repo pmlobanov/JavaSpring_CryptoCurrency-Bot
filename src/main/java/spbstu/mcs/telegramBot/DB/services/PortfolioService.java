@@ -1,21 +1,21 @@
 package spbstu.mcs.telegramBot.DB.services;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
-import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 import spbstu.mcs.telegramBot.DB.repositories.PortfolioRepository;
-import spbstu.mcs.telegramBot.DB.repositories.UserRepository;
 import spbstu.mcs.telegramBot.model.Currency;
 import spbstu.mcs.telegramBot.model.Portfolio;
-import spbstu.mcs.telegramBot.model.User;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Сервис для управления портфелями криптовалют.
@@ -32,28 +32,27 @@ import java.util.Optional;
 @Service
 public class PortfolioService {
     private final PortfolioRepository portfolioRepository;
-    private final UserRepository userRepository;
     private final UserService userService;
- //   private final PriceFetcher priceFetcher;
-//    private final CurrencyConverter currencyConverter;
-    private final ObjectMapper objectMapper;
-
-    @Autowired
-    private MongoTemplate mongoTemplate;
+    private final Map<Currency.Crypto, BigDecimal> maxAmounts;
+    private static final Logger log = LoggerFactory.getLogger(PortfolioService.class);
 
     @Autowired
     public PortfolioService(PortfolioRepository portfolioRepository, 
-                          UserRepository userRepository,
-                          @Lazy UserService userService,
-                         // PriceFetcher priceFetcher,
-                          //CurrencyConverter currencyConverter,
-                          ObjectMapper objectMapper) {
+                          @Lazy UserService userService) {
         this.portfolioRepository = portfolioRepository;
-        this.userRepository = userRepository;
         this.userService = userService;
-    //    this.priceFetcher = priceFetcher;
-    //    this.currencyConverter = currencyConverter;
-        this.objectMapper = objectMapper;
+        
+        // Initialize maximum amounts for each cryptocurrency
+        this.maxAmounts = new HashMap<>();
+        maxAmounts.put(Currency.Crypto.BTC, new BigDecimal("1000")); // 1000 BTC
+        maxAmounts.put(Currency.Crypto.ETH, new BigDecimal("10000")); // 10000 ETH
+        maxAmounts.put(Currency.Crypto.SOL, new BigDecimal("100000")); // 100000 SOL
+        maxAmounts.put(Currency.Crypto.XRP, new BigDecimal("1000000")); // 1000000 XRP
+        maxAmounts.put(Currency.Crypto.ADA, new BigDecimal("1000000")); // 1000000 ADA
+        maxAmounts.put(Currency.Crypto.DOGE, new BigDecimal("10000000")); // 10000000 DOGE
+        maxAmounts.put(Currency.Crypto.AVAX, new BigDecimal("100000")); // 100000 AVAX
+        maxAmounts.put(Currency.Crypto.NEAR, new BigDecimal("1000000")); // 1000000 NEAR
+        maxAmounts.put(Currency.Crypto.LTC, new BigDecimal("100000")); // 100000 LTC
     }
 
     /**
@@ -69,8 +68,7 @@ public class PortfolioService {
             .flatMap(user -> {
                 Portfolio portfolio = new Portfolio(chatId);
                 Portfolio savedPortfolio = portfolioRepository.save(portfolio);
-                // Добавляем portfolioId пользователю и обновляем userTgName
-                return userService.addPortfolioToUser(chatId, savedPortfolio.getId(), user.getUserTgName())
+                return userService.addPortfolioToUser(chatId, savedPortfolio.getId())
                     .thenReturn(savedPortfolio);
             });
     }
@@ -112,27 +110,56 @@ public class PortfolioService {
         portfolioRepository.delete(portfolio);
     }
 
-    public List<Portfolio> getUserPortfolios(String userTgName) {
-        User user = userRepository.findByUserTgName(userTgName);
-        if (user == null) {
-            throw new RuntimeException("User not found");
-        }
-        return portfolioRepository.findAllById(user.getPortfolioIds());
-    }
-
     public Portfolio addCryptoToPortfolio(String portfolioId, Currency.Crypto crypto, BigDecimal amount) {
         Portfolio portfolio = portfolioRepository.findById(portfolioId)
-            .orElseThrow(() -> new RuntimeException("Portfolio not found"));
+            .orElseThrow(() -> new RuntimeException("Портфель не найден"));
 
         if (amount.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new IllegalArgumentException("Amount must be positive");
+            throw new IllegalArgumentException("Количество должно быть положительным");
+        }
+
+        if (amount.compareTo(new BigDecimal("0.000001")) < 0) {
+            throw new IllegalArgumentException("Минимальное количество должно быть не менее 0.000001");
+        }
+
+        if (amount.scale() > 6) {
+            throw new IllegalArgumentException("Количество не может содержать более 6 знаков после запятой");
+        }
+
+        // Check maximum amount for the cryptocurrency
+        BigDecimal maxAmount = maxAmounts.get(crypto);
+        if (maxAmount == null) {
+            throw new IllegalArgumentException("Неподдерживаемая криптовалюта");
+        }
+
+        // Calculate new total amount
+        BigDecimal currentAmount = portfolio.getCount() == null ? BigDecimal.ZERO : portfolio.getCount();
+        BigDecimal newTotal = currentAmount.add(amount);
+
+        if (newTotal.compareTo(maxAmount) > 0) {
+            StringBuilder limits = new StringBuilder();
+            limits.append("Ограничения по максимальному количеству:\n");
+            maxAmounts.forEach((c, max) -> limits.append(String.format("- %s: %s\n", c.getCode(), max)));
+            
+            throw new IllegalArgumentException(String.format(
+                "Превышено максимальное количество для %s\n" +
+                "Текущее количество в портфеле: %s %s\n" +
+                "Попытка добавить: %s %s\n" +
+                "Максимально допустимое количество: %s %s\n\n" +
+                "%s",
+                crypto.getCode(),
+                currentAmount, crypto.getCode(),
+                amount, crypto.getCode(),
+                maxAmount, crypto.getCode(),
+                limits.toString()
+            ));
         }
 
         if (portfolio.getCryptoCurrency() == null || portfolio.getCryptoCurrency() == crypto) {
             portfolio.setCryptoCurrency(crypto);
-            portfolio.setCount(portfolio.getCount() == null ? amount : portfolio.getCount().add(amount));
+            portfolio.setCount(newTotal);
         } else {
-            throw new IllegalArgumentException("Portfolio already contains a different cryptocurrency");
+            throw new IllegalArgumentException("Портфель уже содержит другую криптовалюту");
         }
 
         return portfolioRepository.save(portfolio);
@@ -140,19 +167,27 @@ public class PortfolioService {
 
     public Portfolio removeCryptoFromPortfolio(String portfolioId, Currency.Crypto crypto, BigDecimal amount) {
         Portfolio portfolio = portfolioRepository.findById(portfolioId)
-            .orElseThrow(() -> new RuntimeException("Portfolio not found"));
+            .orElseThrow(() -> new RuntimeException("Портфель не найден"));
 
         if (amount.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new IllegalArgumentException("Amount must be positive");
+            throw new IllegalArgumentException("Количество должно быть положительным");
+        }
+
+        if (amount.compareTo(new BigDecimal("0.000001")) < 0) {
+            throw new IllegalArgumentException("Минимальное количество должно быть не менее 0.000001");
+        }
+
+        if (amount.scale() > 6) {
+            throw new IllegalArgumentException("Количество не может содержать более 6 знаков после запятой");
         }
 
         if (portfolio.getCryptoCurrency() != crypto) {
-            throw new IllegalArgumentException("Portfolio does not contain this cryptocurrency");
+            throw new IllegalArgumentException("Портфель не содержит данную криптовалюту");
         }
 
         BigDecimal currentAmount = portfolio.getCount();
         if (currentAmount.compareTo(amount) < 0) {
-            throw new IllegalArgumentException("Insufficient amount");
+            throw new IllegalArgumentException("Недостаточное количество");
         }
 
         portfolio.setCount(currentAmount.subtract(amount));
@@ -246,9 +281,16 @@ public class PortfolioService {
         return portfolioRepository.save(portfolio);
     }
 
-    public Portfolio delete(Portfolio portfolio) {
-        portfolioRepository.delete(portfolio);
-        return portfolio;
+    public Mono<Void> delete(Portfolio portfolio) {
+        return Mono.fromRunnable(() -> {
+            try {
+                portfolioRepository.delete(portfolio);
+                log.info("Successfully deleted portfolio with ID: {}", portfolio.getId());
+            } catch (Exception e) {
+                log.error("Error deleting portfolio with ID {}: {}", portfolio.getId(), e.getMessage());
+                throw new RuntimeException("Failed to delete portfolio", e);
+            }
+        });
     }
 
     public Optional<Portfolio> findById(String portfolioId) {

@@ -5,7 +5,6 @@
                 "service",
                 "DB::services",
                 "model",
-                "controller",
                 "security"
         }
 )

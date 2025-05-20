@@ -2,7 +2,6 @@ package spbstu.mcs.telegramBot.cryptoApi;
 
 import static org.junit.Assert.*;
 import static org.mockito.Mockito.*;
-import static org.mockito.ArgumentMatchers.*;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -11,10 +10,7 @@ import org.junit.runners.JUnit4;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-
-import org.springframework.web.reactive.function.client.WebClient;
 
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
@@ -22,14 +18,12 @@ import reactor.test.StepVerifier;
 import spbstu.mcs.telegramBot.model.Currency;
 import spbstu.mcs.telegramBot.model.Currency.Crypto;
 import spbstu.mcs.telegramBot.model.Currency.Fiat;
-import spbstu.mcs.telegramBot.config.VaultConfig;
+import spbstu.mcs.telegramBot.DB.services.UserService;
+import spbstu.mcs.telegramBot.model.User;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.lang.reflect.Field;
 import java.time.Duration;
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * Тесты для CryptoInformation
@@ -41,11 +35,13 @@ public class CryptoInformationTest {
     private PriceFetcher priceFetcher;
     private ObjectMapper objectMapper;
     private JsonNode jsonNode;
+    private UserService userService;
     
     private CryptoInformation cryptoInformation;
     private CryptoInformation spyCryptoInformation;
     
     private static final String SECRET_PATH = "secret/data/crypto-bot";
+    private static final String TEST_CHAT_ID = "123456789";
     
     @Before
     public void setUp() {
@@ -54,9 +50,18 @@ public class CryptoInformationTest {
         priceFetcher = mock(PriceFetcher.class);
         objectMapper = mock(ObjectMapper.class);
         jsonNode = mock(JsonNode.class);
+        userService = mock(UserService.class);
         
-        // Не используем Vault, а просто создаем CryptoInformation с основными моками
-        cryptoInformation = new CryptoInformation(objectMapper, currencyConverter, priceFetcher);
+        // Создаем тестового пользователя
+        User testUser = new User(TEST_CHAT_ID);
+        testUser.setCurrentCrypto(Currency.Crypto.BTC.getCode());
+        testUser.setCurrentFiat(Currency.Fiat.USD.getCode());
+        
+        // Настраиваем поведение userService
+        when(userService.getUserByChatId(TEST_CHAT_ID)).thenReturn(Mono.just(testUser));
+        
+        // Создаем CryptoInformation с основными моками
+        cryptoInformation = new CryptoInformation(objectMapper, currencyConverter, priceFetcher, userService);
         spyCryptoInformation = spy(cryptoInformation);
     }
 
@@ -67,12 +72,6 @@ public class CryptoInformationTest {
     public void testShowPriceHistory() throws Exception {
         // Тестовые данные
         String period = "7d";
-        Crypto crypto = Crypto.BTC;
-        Fiat fiat = Fiat.USD;
-        
-        // Устанавливаем текущую криптовалюту и фиат через reflection
-        setStaticField(Crypto.class, "currentCrypto", crypto);
-        setStaticField(Fiat.class, "currentFiat", fiat);
         
         // Мокируем обменный курс с использованием doReturn для предотвращения реальных вызовов
         doReturn(Mono.just(BigDecimal.valueOf(1.0)))
@@ -112,10 +111,10 @@ public class CryptoInformationTest {
             
         // Перенаправляем вызов метода showPriceHistory на прямой возврат результата
         doReturn(Mono.just(expectedResult))
-            .when(spyCryptoInformation).showPriceHistory(eq(period));
+            .when(spyCryptoInformation).showPriceHistory(eq(period), eq(TEST_CHAT_ID));
             
         // Вызываем тестируемый метод с таймаутом для предотвращения зависания
-        Mono<String> result = spyCryptoInformation.showPriceHistory(period)
+        Mono<String> result = spyCryptoInformation.showPriceHistory(period, TEST_CHAT_ID)
             .timeout(Duration.ofSeconds(5));
         
         // Проверяем результат с таймаутом для предотвращения зависания теста
@@ -140,14 +139,6 @@ public class CryptoInformationTest {
      */
     @Test
     public void testShowCurrentPrice() throws Exception {
-        // Тестовые данные
-        Crypto crypto = Crypto.BTC;
-        Fiat fiat = Fiat.USD;
-        
-        // Устанавливаем текущую криптовалюту и фиат через reflection
-        setStaticField(Crypto.class, "currentCrypto", crypto);
-        setStaticField(Fiat.class, "currentFiat", fiat);
-        
         // Мокируем обменный курс с использованием doReturn для предотвращения реальных вызовов
         doReturn(Mono.just(BigDecimal.valueOf(1.0)))
             .when(currencyConverter).getUsdToFiatRate(any(Fiat.class));
@@ -188,7 +179,7 @@ public class CryptoInformationTest {
         doReturn(expectedResult).when(objectMapper).writeValueAsString(any(ObjectNode.class));
         
         // Вызываем тестируемый метод с таймаутом
-        Mono<String> result = spyCryptoInformation.showCurrentPrice()
+        Mono<String> result = spyCryptoInformation.showCurrentPrice(TEST_CHAT_ID)
             .timeout(Duration.ofSeconds(3));
         
         // Проверяем результат с таймаутом
@@ -208,13 +199,6 @@ public class CryptoInformationTest {
         verify(priceFetcher).getCurrentPrice(any(Crypto.class));
         verify(objectMapper).readTree(anyString());
         verify(objectMapper).writeValueAsString(any());
-    }
-    
-    // Вспомогательный метод для установки значений статических полей
-    private void setStaticField(Class<?> targetClass, String fieldName, Object value) throws Exception {
-        Field field = targetClass.getDeclaredField(fieldName);
-        field.setAccessible(true);
-        field.set(null, value);
     }
 
     /**
@@ -281,10 +265,10 @@ public class CryptoInformationTest {
         
         // Конфигурируем мок для возврата подготовленного ответа
         doReturn(Mono.just(expectedResult))
-            .when(mockCryptoInfo).compareCurrencies(any(Crypto.class), any(Crypto.class), anyString());
+            .when(mockCryptoInfo).compareCurrencies(any(Crypto.class), any(Crypto.class), anyString(), anyString());
         
         // Вызываем тестируемый метод с таймаутом
-        String result = mockCryptoInfo.compareCurrencies(crypto1, crypto2, period)
+        String result = mockCryptoInfo.compareCurrencies(crypto1, crypto2, period, TEST_CHAT_ID)
                                       .timeout(Duration.ofSeconds(5))
                                       .block();
         
@@ -334,6 +318,6 @@ public class CryptoInformationTest {
             1.75, ratioChangePercent.doubleValue(), 0.01);
         
         // Проверка вызова метода с правильными параметрами
-        verify(mockCryptoInfo).compareCurrencies(eq(crypto1), eq(crypto2), eq(period));
+        verify(mockCryptoInfo).compareCurrencies(eq(crypto1), eq(crypto2), eq(period), eq(TEST_CHAT_ID));
     }
 } 

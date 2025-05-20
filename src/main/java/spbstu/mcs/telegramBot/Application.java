@@ -7,11 +7,12 @@ import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.modulith.Modulithic;
 import org.telegram.telegrambots.meta.TelegramBotsApi;
 import org.telegram.telegrambots.updatesreceivers.DefaultBotSession;
+import spbstu.mcs.telegramBot.server.AppConfigurations;
 import spbstu.mcs.telegramBot.service.KafkaConsumerService;
 import spbstu.mcs.telegramBot.service.KafkaProducerService;
 import spbstu.mcs.telegramBot.service.TelegramBotService;
 import spbstu.mcs.telegramBot.server.ServerApp;
-import spbstu.mcs.telegramBot.config.AppConfigurations;
+
 import java.util.List;
 
 @Modulithic
@@ -21,7 +22,7 @@ public class Application {
     public static void main(String[] args) {
         try {
             // Start Spring context with our configuration
-            ConfigurableApplicationContext context = new AnnotationConfigApplicationContext(ApplicationConfig.class);
+            ConfigurableApplicationContext context = new AnnotationConfigApplicationContext(AppConfigurations.class);
             logger.info("Spring context initialized successfully");
             
             // Get services from context

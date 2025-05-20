@@ -146,6 +146,9 @@ public class Notification {
     @Field("currentEMA")
     private Double currentEMA;
 
+    @Field("isAbove")
+    private Boolean isAbove; // Для EMA алертов: true если EMA выше цены, false если ниже
+
     /**
      * Конструктор без параметров для Spring Data MongoDB
      */
@@ -276,5 +279,13 @@ public class Notification {
 
     public void setFiatCurrency(Currency.Fiat fiatCurrency) {
         this.fiatCurrency = fiatCurrency;
+    }
+
+    public Boolean getIsAbove() {
+        return isAbove;
+    }
+
+    public void setIsAbove(Boolean isAbove) {
+        this.isAbove = isAbove;
     }
 }

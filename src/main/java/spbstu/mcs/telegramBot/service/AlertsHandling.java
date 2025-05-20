@@ -9,7 +9,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
@@ -17,10 +16,8 @@ import spbstu.mcs.telegramBot.DB.services.NotificationService;
 import spbstu.mcs.telegramBot.DB.services.UserService;
 import spbstu.mcs.telegramBot.cryptoApi.CurrencyConverter;
 import spbstu.mcs.telegramBot.cryptoApi.PriceFetcher;
-import spbstu.mcs.telegramBot.model.Currency;
 import spbstu.mcs.telegramBot.model.Currency.Crypto;
 import spbstu.mcs.telegramBot.model.Notification;
-import spbstu.mcs.telegramBot.model.User;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -37,7 +34,6 @@ import java.util.List;
 @Service
 public class AlertsHandling {
     private static final Logger log = LoggerFactory.getLogger(AlertsHandling.class);
-    private static final int EMA_PERIOD = 20; // Период для EMA
 
     private final ObjectMapper objectMapper;
     private final CurrencyConverter currencyConverter;
@@ -53,7 +49,6 @@ public class AlertsHandling {
                           PriceFetcher priceFetcher,
                           TelegramBotService telegramBotService,
                           NotificationService notificationService,
-                     //     NotificationRepository notificationRepository,
                           UserService userService) {
         log.info("Инициализация сервиса AlertsHandling...");
         this.objectMapper = objectMapper;
@@ -61,7 +56,6 @@ public class AlertsHandling {
         this.priceFetcher = priceFetcher;
         this.telegramBotService = telegramBotService;
         this.notificationService = notificationService;
-      //  this.notificationRepository = notificationRepository;
         this.userService = userService;
         log.info("Сервис AlertsHandling успешно инициализирован");
     }
@@ -77,57 +71,80 @@ public class AlertsHandling {
      * @return Mono<String> Сообщение о результате установки алерта
      */
     public Mono<String> setAlertVal(Crypto cryptoCurrency, BigDecimal maxPrice, BigDecimal minPrice, String chatId) {
-        return Mono.zip(
-                priceFetcher.getCurrentPrice(cryptoCurrency),
-                currencyConverter.getUsdToFiatRate(Currency.Fiat.getCurrentFiat())
-        ).flatMap(tuple -> {
-            try {
-                String priceJson = tuple.getT1();
-                BigDecimal conversionRate = tuple.getT2();
+        // Проверяем количество знаков после запятой
+        if (maxPrice.scale() > 2 || minPrice.scale() > 2) {
+            return Mono.just("❌ Цена может содержать не более 2 знаков после запятой");
+        }
 
-                JsonNode jsonNode = objectMapper.readTree(priceJson);
-                BigDecimal currentPriceUSD = new BigDecimal(jsonNode.get("price").asText());
-                long timestamp = jsonNode.get("timestamp").asLong();
+        // Проверяем, что цены не равны нулю
+        if (maxPrice.compareTo(BigDecimal.ZERO) <= 0 || minPrice.compareTo(BigDecimal.ZERO) <= 0) {
+            return Mono.just("❌ Цены должны быть больше нуля");
+        }
 
-                // Конвертируем текущую цену в целевую валюту
-                BigDecimal currentPrice = currentPriceUSD.multiply(conversionRate)
-                        .setScale(2, RoundingMode.HALF_UP);
+        // Проверяем максимальную границу цены (1 миллиард)
+        BigDecimal MAX_PRICE = new BigDecimal("1000000000");
+        if (maxPrice.compareTo(MAX_PRICE) > 0 || minPrice.compareTo(MAX_PRICE) > 0) {
+            return Mono.just("❌ Цена не может превышать 1 000 000 000");
+        }
 
-                // Используем введенные значения напрямую, так как они уже в целевой валюте
-                BigDecimal maxPriceInFiat = maxPrice.setScale(2, RoundingMode.HALF_UP);
-                BigDecimal minPriceInFiat = minPrice.setScale(2, RoundingMode.HALF_UP);
+        // Получаем все VALUE алерты пользователя для данной криптовалюты
+        return notificationService.getAllUserAlerts(chatId)
+                .filter(alert -> alert.getThresholdType() == Notification.ThresholdType.VALUE 
+                        && alert.getCryptoCurrency() == cryptoCurrency)
+                .next()
+                .flatMap(existingAlert -> notificationService.delete(existingAlert))
+                .then(userService.getUserByChatId(chatId))
+                .flatMap(user -> Mono.zip(
+                        priceFetcher.getCurrentPrice(cryptoCurrency),
+                        currencyConverter.getUsdToFiatRate(user.getFiatCurrency())
+                ).flatMap(tuple -> {
+                    try {
+                        String priceJson = tuple.getT1();
+                        BigDecimal conversionRate = tuple.getT2();
 
-                log.info("Установка VALUE алерта для {}: текущая цена={} USD ({} {})",
-                        cryptoCurrency, currentPriceUSD, currentPrice, Currency.Fiat.getCurrentFiat().getCode());
+                        JsonNode jsonNode = objectMapper.readTree(priceJson);
+                        BigDecimal currentPriceUSD = new BigDecimal(jsonNode.get("price").asText());
+                        long timestamp = jsonNode.get("timestamp").asLong();
 
-                Notification notification = new Notification(
-                        null,
-                        cryptoCurrency,
-                        Currency.Fiat.getCurrentFiat(),
-                        Notification.ThresholdType.VALUE,
-                        true,
-                        chatId,
-                        maxPriceInFiat.doubleValue(),
-                        minPriceInFiat.doubleValue(),
-                        currentPrice.doubleValue()
-                );
+                        // Конвертируем текущую цену в целевую валюту
+                        BigDecimal currentPrice = currentPriceUSD.multiply(conversionRate)
+                                .setScale(2, RoundingMode.HALF_UP);
 
-                notification.setStartTimestamp(timestamp);
+                        // Используем введенные значения напрямую, так как они уже в целевой валюте
+                        BigDecimal maxPriceInFiat = maxPrice;
+                        BigDecimal minPriceInFiat = minPrice;
 
-                return notificationService.createUserNotification(notification)
-                        .then(Mono.just(String.format("✅ Алерт установлен для %s\n" +
-                                        "💰 Текущая цена: %.2f %s\n" +
-                                        "📈 Верхняя граница: %.2f %s\n" +
-                                        "📉 Нижняя граница: %.2f %s",
-                                cryptoCurrency.getCode(),
-                                currentPrice, Currency.Fiat.getCurrentFiat().getCode(),
-                                maxPriceInFiat, Currency.Fiat.getCurrentFiat().getCode(),
-                                minPriceInFiat, Currency.Fiat.getCurrentFiat().getCode())));
-            } catch (Exception e) {
-                log.error("Ошибка при установке VALUE алерта: {}", e.getMessage());
-                return Mono.just("❌ Ошибка при установке алерта: " + e.getMessage());
-            }
-        });
+                        log.info("Установка VALUE алерта для {}: текущая цена={} USD ({} {})",
+                                cryptoCurrency, currentPriceUSD, currentPrice, user.getFiatCurrency().getCode());
+
+                        Notification notification = new Notification(
+                                null,
+                                cryptoCurrency,
+                                user.getFiatCurrency(),
+                                Notification.ThresholdType.VALUE,
+                                true,
+                                chatId,
+                                maxPriceInFiat.doubleValue(),
+                                minPriceInFiat.doubleValue(),
+                                currentPrice.doubleValue()
+                        );
+
+                        notification.setStartTimestamp(timestamp);
+
+                        return notificationService.createUserNotification(notification)
+                                .then(Mono.just(String.format("✅ Алерт установлен для %s\n" +
+                                                "💰 Текущая цена: %.2f %s\n" +
+                                                "📈 Верхняя граница: %.2f %s\n" +
+                                                "📉 Нижняя граница: %.2f %s",
+                                        cryptoCurrency.getCode(),
+                                        currentPrice, notification.getFiatCurrency().getCode(),
+                                        maxPriceInFiat, notification.getFiatCurrency().getCode(),
+                                        minPriceInFiat, notification.getFiatCurrency().getCode())));
+                    } catch (Exception e) {
+                        log.error("Ошибка при установке VALUE алерта: {}", e.getMessage());
+                        return Mono.just("❌ Ошибка при установке алерта: " + e.getMessage());
+                    }
+                }));
     }
 
     /**
@@ -141,65 +158,88 @@ public class AlertsHandling {
      * @return Mono<String> Сообщение о результате установки алерта
      */
     public Mono<String> setAlertPerc(Crypto cryptoCurrency, BigDecimal upPercent, BigDecimal downPercent, String chatId) {
-        return Mono.zip(
-                priceFetcher.getCurrentPrice(cryptoCurrency),
-                currencyConverter.getUsdToFiatRate(Currency.Fiat.getCurrentFiat())
-        ).flatMap(tuple -> {
-            try {
-                String priceJson = tuple.getT1();
-                BigDecimal conversionRate = tuple.getT2();
+        // Проверяем количество знаков после запятой
+        if (upPercent.scale() > 2 || downPercent.scale() > 2) {
+            return Mono.just("❌ Процент может содержать не более 2 знаков после запятой");
+        }
 
-                JsonNode jsonNode = objectMapper.readTree(priceJson);
-                BigDecimal currentPriceUSD = new BigDecimal(jsonNode.get("price").asText());
-                long timestamp = jsonNode.get("timestamp").asLong();
+        // Проверяем, что проценты положительные и не равны нулю
+        if (upPercent.compareTo(BigDecimal.ZERO) <= 0 || downPercent.compareTo(BigDecimal.ZERO) <= 0) {
+            return Mono.just("❌ Проценты должны быть больше нуля");
+        }
 
-                // Конвертируем текущую цену в целевую валюту
-                BigDecimal currentPrice = currentPriceUSD.multiply(conversionRate)
-                        .setScale(2, RoundingMode.HALF_UP);
+        // Проверяем максимальную границу процента (100%)
+        BigDecimal MAX_PERCENT = new BigDecimal("100");
+        if (upPercent.compareTo(MAX_PERCENT) > 0 || downPercent.compareTo(MAX_PERCENT) > 0) {
+            return Mono.just("❌ Процент не может превышать 100%");
+        }
 
-                // Рассчитываем границы в целевой валюте
-                BigDecimal upperBoundary = currentPrice.multiply(
-                                BigDecimal.ONE.add(upPercent.divide(new BigDecimal("100"), 4, RoundingMode.HALF_UP)))
-                        .setScale(2, RoundingMode.HALF_UP);
-                BigDecimal lowerBoundary = currentPrice.multiply(
-                                BigDecimal.ONE.subtract(downPercent.divide(new BigDecimal("100"), 4, RoundingMode.HALF_UP)))
-                        .setScale(2, RoundingMode.HALF_UP);
+        // Получаем все PERCENT алерты пользователя для данной криптовалюты
+        return notificationService.getAllUserAlerts(chatId)
+                .filter(alert -> alert.getThresholdType() == Notification.ThresholdType.PERCENT 
+                        && alert.getCryptoCurrency() == cryptoCurrency)
+                .next()
+                .flatMap(existingAlert -> notificationService.delete(existingAlert))
+                .then(userService.getUserByChatId(chatId))
+                .flatMap(user -> Mono.zip(
+                        priceFetcher.getCurrentPrice(cryptoCurrency),
+                        currencyConverter.getUsdToFiatRate(user.getFiatCurrency())
+                ).flatMap(tuple -> {
+                    try {
+                        String priceJson = tuple.getT1();
+                        BigDecimal conversionRate = tuple.getT2();
 
-                log.info("Установка PERCENT алерта для {}: текущая цена={} USD ({} {})",
-                        cryptoCurrency, currentPriceUSD, currentPrice, Currency.Fiat.getCurrentFiat().getCode());
-                log.info("Границы: верхняя={} {} (+{}%), нижняя={} {} (-{}%)",
-                        upperBoundary, Currency.Fiat.getCurrentFiat().getCode(), upPercent,
-                        lowerBoundary, Currency.Fiat.getCurrentFiat().getCode(), downPercent);
+                        JsonNode jsonNode = objectMapper.readTree(priceJson);
+                        BigDecimal currentPriceUSD = new BigDecimal(jsonNode.get("price").asText());
+                        long timestamp = jsonNode.get("timestamp").asLong();
 
-                Notification notification = new Notification(
-                        null,
-                        cryptoCurrency,
-                        Currency.Fiat.getCurrentFiat(),
-                        Notification.ThresholdType.PERCENT,
-                        true,
-                        chatId,
-                        upperBoundary.doubleValue(),
-                        lowerBoundary.doubleValue(),
-                        currentPrice.doubleValue()
-                );
+                        // Конвертируем текущую цену в целевую валюту
+                        BigDecimal currentPrice = currentPriceUSD.multiply(conversionRate)
+                                .setScale(2, RoundingMode.HALF_UP);
 
-                notification.setUpPercent(upPercent.doubleValue());
-                notification.setDownPercent(downPercent.doubleValue());
-                notification.setStartTimestamp(timestamp);
+                        // Рассчитываем границы на основе процентов
+                        BigDecimal maxPriceInFiat = currentPrice.multiply(BigDecimal.ONE.add(upPercent.divide(new BigDecimal("100"))))
+                                .setScale(2, RoundingMode.HALF_UP);
+                        BigDecimal minPriceInFiat = currentPrice.multiply(BigDecimal.ONE.subtract(downPercent.divide(new BigDecimal("100"))))
+                                .setScale(2, RoundingMode.HALF_UP);
 
-                return notificationService.createUserNotification(notification)
-                        .then(Mono.just(String.format("✅ Алерт установлен для %s\n" +
-                                        "💰 Текущая цена: %.2f %s\n" +
-                                        "📈 Рост: +%.2f%%\n" +
-                                        "📉 Падение: -%.2f%%",
-                                cryptoCurrency.getCode(),
-                                currentPrice, Currency.Fiat.getCurrentFiat().getCode(),
-                                upPercent, downPercent)));
-            } catch (Exception e) {
-                log.error("Ошибка при установке PERCENT алерта: {}", e.getMessage());
-                return Mono.just("❌ Ошибка при установке алерта: " + e.getMessage());
-            }
-        });
+                        log.info("Установка PERCENT алерта для {}: текущая цена={} USD ({} {})",
+                                cryptoCurrency, currentPriceUSD, currentPrice, user.getFiatCurrency().getCode());
+
+                        Notification notification = new Notification(
+                                null,
+                                cryptoCurrency,
+                                user.getFiatCurrency(),
+                                Notification.ThresholdType.PERCENT,
+                                true,
+                                chatId,
+                                maxPriceInFiat.doubleValue(),
+                                minPriceInFiat.doubleValue(),
+                                currentPrice.doubleValue()
+                        );
+
+                        // Сохраняем проценты в уведомлении
+                        notification.setUpPercent(upPercent.doubleValue());
+                        notification.setDownPercent(downPercent.doubleValue());
+                        notification.setStartTimestamp(timestamp);
+
+                        return notificationService.createUserNotification(notification)
+                                .then(Mono.just(String.format("✅ Алерт установлен для %s\n" +
+                                                "💰 Текущая цена: %.2f %s\n" +
+                                                "📈 Рост: +%.2f%%\n" +
+                                                "📉 Падение: -%.2f%%\n" +
+                                                "📊 Верхняя граница: %.2f %s\n" +
+                                                "📊 Нижняя граница: %.2f %s",
+                                        cryptoCurrency.getCode(),
+                                        currentPrice, notification.getFiatCurrency().getCode(),
+                                        upPercent, downPercent,
+                                        maxPriceInFiat, notification.getFiatCurrency().getCode(),
+                                        minPriceInFiat, notification.getFiatCurrency().getCode())));
+                    } catch (Exception e) {
+                        log.error("Ошибка при установке PERCENT алерта: {}", e.getMessage());
+                        return Mono.just("❌ Ошибка при установке алерта: " + e.getMessage());
+                    }
+                }));
     }
 
     /**
@@ -213,72 +253,81 @@ public class AlertsHandling {
      * @return Mono<String> JSON-строка с текущей ценой и timestamp установки
      */
     public Mono<String> setAlertEMA(Crypto cryptoCurrency, String chatId) {
-        return Mono.zip(
-                priceFetcher.getCurrentPrice(cryptoCurrency),
-                currencyConverter.getUsdToFiatRate(Currency.Fiat.getCurrentFiat())
-        ).flatMap(tuple -> {
-            try {
-                String priceJson = tuple.getT1();
-                BigDecimal conversionRate = tuple.getT2();
+        // Получаем все EMA алерты пользователя
+        return notificationService.getAllUserAlerts(chatId)
+                .filter(alert -> alert.getThresholdType() == Notification.ThresholdType.EMA 
+                        && alert.getCryptoCurrency() == cryptoCurrency)
+                .next()
+                .flatMap(existingAlert -> notificationService.delete(existingAlert))
+                .then(userService.getUserByChatId(chatId))
+                .flatMap(user -> Mono.zip(
+                        priceFetcher.getCurrentPrice(cryptoCurrency),
+                        currencyConverter.getUsdToFiatRate(user.getFiatCurrency())
+                ).flatMap(tuple -> {
+                    try {
+                        String priceJson = tuple.getT1();
+                        BigDecimal conversionRate = tuple.getT2();
 
-                JsonNode jsonNode = objectMapper.readTree(priceJson);
-                BigDecimal currentPriceUSD = new BigDecimal(jsonNode.get("price").asText());
-                long startTimestamp = jsonNode.get("timestamp").asLong();
+                        JsonNode jsonNode = objectMapper.readTree(priceJson);
+                        BigDecimal currentPriceUSD = new BigDecimal(jsonNode.get("price").asText());
+                        long startTimestamp = jsonNode.get("timestamp").asLong();
 
-                // Получаем 20 исторических цен (одна на каждый из последних 20 дней)
-                int EMA_PERIOD = 20;
-                List<Mono<BigDecimal>> priceRequests = new ArrayList<>();
-                for (int i = 0; i < EMA_PERIOD; i++) {
-                    long ts = startTimestamp - (i * 24 * 60 * 60);
-                    Mono<BigDecimal> priceMono = priceFetcher.getSymbolPriceByTime(cryptoCurrency, ts)
-                            .flatMap(this::parsePrice)
-                            .retryWhen(Retry.fixedDelay(2, Duration.ofSeconds(1))
-                                .doBeforeRetry(signal -> 
-                                    log.warn("Retrying database operation after error: {}", signal.failure().getMessage())
-                                ))
-                            .onErrorResume(e -> Mono.just(BigDecimal.ZERO));
-                    priceRequests.add(priceMono);
-                }
+                        // Получаем 20 исторических цен (одна на каждый из последних 20 дней)
+                        int EMA_PERIOD = 20;
+                        List<Mono<BigDecimal>> priceRequests = new ArrayList<>();
+                        for (int i = 0; i < EMA_PERIOD; i++) {
+                            long ts = startTimestamp - (i * 24 * 60 * 60);
+                            Mono<BigDecimal> priceMono = priceFetcher.getSymbolPriceByTime(cryptoCurrency, ts)
+                                    .flatMap(this::parsePrice)
+                                    .retryWhen(Retry.fixedDelay(2, Duration.ofSeconds(1))
+                                        .doBeforeRetry(signal -> 
+                                            log.warn("Retrying database operation after error: {}", signal.failure().getMessage())
+                                        ))
+                                    .onErrorResume(e -> Mono.just(BigDecimal.ZERO));
+                            priceRequests.add(priceMono);
+                        }
 
-                return Flux.merge(priceRequests)
-                        .collectList()
-                        .flatMap(prices -> {
-                            // Рассчитываем SMA
-                            BigDecimal sum = prices.stream().reduce(BigDecimal.ZERO, BigDecimal::add);
-                            BigDecimal sma = sum.divide(new BigDecimal(prices.size()), 2, RoundingMode.HALF_UP);
+                        return Flux.merge(priceRequests)
+                                .collectList()
+                                .flatMap(prices -> {
+                                    // Рассчитываем SMA
+                                    BigDecimal sum = prices.stream().reduce(BigDecimal.ZERO, BigDecimal::add);
+                                    BigDecimal sma = sum.divide(new BigDecimal(prices.size()), 2, RoundingMode.HALF_UP);
 
-                            // Конвертируем цены
-                            BigDecimal currentPriceFiat = currentPriceUSD.multiply(conversionRate).setScale(2, RoundingMode.HALF_UP);
-                            BigDecimal smaFiat = sma.multiply(conversionRate).setScale(2, RoundingMode.HALF_UP);
+                                    // Конвертируем цены
+                                    BigDecimal currentPriceFiat = currentPriceUSD.multiply(conversionRate).setScale(2, RoundingMode.HALF_UP);
+                                    BigDecimal smaFiat = sma.multiply(conversionRate).setScale(2, RoundingMode.HALF_UP);
 
-                            Notification notification = new Notification(
-                                    null,
-                                    cryptoCurrency,
-                                    Currency.Fiat.getCurrentFiat(),
-                                    Notification.ThresholdType.EMA,
-                                    false, // isActive не используется
-                                    chatId,
-                                    null, // upperBoundary не используется
-                                    null, // lowerBoundary не используется
-                                    currentPriceUSD.doubleValue()
-                            );
-                            notification.setStartEMA(sma.doubleValue());
-                            notification.setCurrentEMA(sma.doubleValue());
-                            notification.setStartTimestamp(startTimestamp);
+                                    Notification notification = new Notification(
+                                            null,
+                                            cryptoCurrency,
+                                            user.getFiatCurrency(),
+                                            Notification.ThresholdType.EMA,
+                                            false, // isActive не используется
+                                            chatId,
+                                            null, // upperBoundary не используется
+                                            null, // lowerBoundary не используется
+                                            currentPriceFiat.doubleValue() // Сохраняем цену в фиате
+                                    );
+                                    notification.setStartEMA(smaFiat.doubleValue());
+                                    notification.setCurrentEMA(smaFiat.doubleValue());
+                                    notification.setStartTimestamp(startTimestamp);
+                                    // Устанавливаем начальное значение isAbove
+                                    notification.setIsAbove(currentPriceFiat.compareTo(smaFiat) > 0);
 
-                            return notificationService.createUserNotification(notification)
-                                    .then(Mono.just(String.format("✅ Алерт EMA установлен для %s\n" +
-                                                    "💰 Текущая цена: %.2f %s\n" +
-                                                    "📈 Начальное EMA (SMA 20): %.2f %s",
-                                            cryptoCurrency.getCode(),
-                                            currentPriceFiat, Currency.Fiat.getCurrentFiat().getCode(),
-                                            smaFiat, Currency.Fiat.getCurrentFiat().getCode())));
-                        });
-            } catch (Exception e) {
-                log.error("Ошибка при установке EMA алерта: {}", e.getMessage());
-                return Mono.just("❌ Ошибка при установке алерта: " + e.getMessage());
-            }
-        });
+                                    return notificationService.createUserNotification(notification)
+                                            .then(Mono.just(String.format("✅ Алерт EMA установлен для %s\n" +
+                                                            "💰 Текущая цена: %.2f %s\n" +
+                                                            "📈 Начальное EMA (SMA 20): %.2f %s",
+                                                    cryptoCurrency.getCode(),
+                                                    currentPriceFiat, notification.getFiatCurrency().getCode(),
+                                                    smaFiat, notification.getFiatCurrency().getCode())));
+                                });
+                    } catch (Exception e) {
+                        log.error("Ошибка при установке EMA алерта: {}", e.getMessage());
+                        return Mono.just("❌ Ошибка при установке алерта: " + e.getMessage());
+                    }
+                }));
     }
 
     /**
@@ -429,16 +478,16 @@ public class AlertsHandling {
             String cryptoCode = symbol.split("-")[0];
             Crypto cryptoCurrency = Crypto.valueOf(cryptoCode);
 
-            return notificationService.getActiveAlerts(cryptoCurrency)
+            return notificationService.getAllUserAlerts(chatId)
                     .filter(alert -> alert.getThresholdType().toString().equals(type))
-                    .filter(alert -> alert.getChatId() != null && alert.getChatId().equals(chatId))
+                    .filter(alert -> alert.getCryptoCurrency().equals(cryptoCurrency))
                     .next()
                     .flatMap(alert -> notificationService.delete(alert)
-                            .then(Mono.just("Alert deleted successfully")))
-                    .switchIfEmpty(Mono.just("Alert not found"));
+                            .then(Mono.just("✅ Алерт успешно удален")))
+                    .switchIfEmpty(Mono.just("❌ Алерт не найден"));
         } catch (Exception e) {
             log.error("Error deleting alert: {}", e.getMessage());
-            return Mono.just("Error deleting alert: " + e.getMessage());
+            return Mono.just("❌ Ошибка при удалении алерта: " + e.getMessage());
         }
     }
 
@@ -454,203 +503,6 @@ public class AlertsHandling {
                 .then();
     }
 
-    /**
-     * Возвращает список всех установленных алертов для указанного пользователя.
-     *
-     * @param chatId ID чата пользователя в Telegram
-     * @return Mono<SendMessage> Сообщение со списком алертов
-     */
-    private Mono<SendMessage> getAllActiveAlerts(String chatId) {
-        return notificationService.getAllActiveAlerts(chatId)
-                .collectList()
-                .map(notifications -> {
-                    if (notifications.isEmpty()) {
-                        return new SendMessage(chatId, "У вас нет активных алертов.");
-                    }
-
-                    StringBuilder message = new StringBuilder("Ваши активные алерты:\n");
-                    for (Notification notification : notifications) {
-                        message.append(formatNotification(notification)).append("\n");
-                    }
-
-                    return new SendMessage(chatId, message.toString());
-                });
-    }
-
-    private Currency.Crypto findCryptoByCode(String code) {
-        for (Currency.Crypto c : Currency.Crypto.values()) {
-            if (c.getCode().equalsIgnoreCase(code)) {
-                return c;
-            }
-        }
-        return null;
-    }
-
-    private Mono<SendMessage> sendAlertMessage(Notification notification, String message) {
-        return Mono.just(new SendMessage(notification.getChatId(), message))
-                .doOnSuccess(sendMessage -> {
-                    notification.setIsActive(false);
-                    notificationService.save(notification)
-                            .subscribe(saved -> {
-                                telegramBotService.sendResponseAsync(notification.getChatId(), message)
-                                        .subscribe(
-                                                null,
-                                                error -> log.error("Error sending alert message: {}", error.getMessage())
-                                        );
-                            });
-                });
-    }
-
-    private String formatNotification(Notification notification) {
-        return String.format("%s: %s порог на уровне %s",
-                notification.getCryptoCurrency(),
-                notification.getThresholdType(),
-                notification.getActiveThreshold());
-    }
-
-    private Mono<Void> handleValueThreshold(User user, Currency.Crypto cryptoCurrency, Double threshold) {
-        return priceFetcher.getCurrentPrice(cryptoCurrency)
-                .map(currentPrice -> Double.parseDouble(currentPrice))
-                .defaultIfEmpty(0.0)
-                .flatMap(price -> {
-                    Notification notification = new Notification(
-                            null,
-                            cryptoCurrency,
-                            Currency.Fiat.getCurrentFiat(),
-                            Notification.ThresholdType.VALUE,
-                            true,
-                            user.getChatId(),
-                            threshold,
-                            threshold,
-                            price
-                    );
-
-                    return notificationService.createUserNotification(notification)
-                            .then(telegramBotService.sendResponseAsync(user.getChatId(),
-                                    String.format("Алерт установлен для %s на уровне %s %s",
-                                            cryptoCurrency, threshold, Currency.Fiat.getCurrentFiat().getCode())))
-                            .then();
-                });
-    }
-
-    private Mono<Void> handlePercentThreshold(User user, Currency.Crypto cryptoCurrency, Double threshold) {
-        return priceFetcher.getCurrentPrice(cryptoCurrency)
-                .map(currentPrice -> Double.parseDouble(currentPrice))
-                .defaultIfEmpty(0.0)
-                .flatMap(price -> {
-                    Notification notification = new Notification(
-                            null,
-                            cryptoCurrency,
-                            Currency.Fiat.getCurrentFiat(),
-                            Notification.ThresholdType.PERCENT,
-                            true,
-                            user.getChatId(),
-                            threshold,
-                            threshold,
-                            price
-                    );
-
-                    return notificationService.createUserNotification(notification)
-                            .then(telegramBotService.sendResponseAsync(user.getChatId(),
-                                    String.format("Алерт установлен для %s на уровне %s%%", cryptoCurrency, threshold)))
-                            .then();
-                });
-    }
-
-    private Mono<Void> handleEmaThreshold(User user, Currency.Crypto cryptoCurrency, Double threshold) {
-        return priceFetcher.getCurrentPrice(cryptoCurrency)
-                .map(currentPrice -> Double.parseDouble(currentPrice))
-                .defaultIfEmpty(0.0)
-                .flatMap(price -> {
-                    Notification notification = new Notification(
-                            null,
-                            cryptoCurrency,
-                            Currency.Fiat.getCurrentFiat(),
-                            Notification.ThresholdType.EMA,
-                            false, // isActive не используется
-                            user.getChatId(),
-                            null, // upperBoundary не используется
-                            null, // lowerBoundary не используется
-                            price
-                    );
-
-                    return notificationService.createUserNotification(notification)
-                            .then(telegramBotService.sendResponseAsync(user.getChatId(),
-                                    String.format("Алерт установлен для %s на уровне EMA %s", cryptoCurrency, threshold)))
-                            .then();
-                });
-    }
-
-    private String formatDuration(long timestamp) {
-        long currentTime = System.currentTimeMillis() / 1000; // текущее время в секундах
-        long duration = currentTime - timestamp;
-
-        long days = duration / (24 * 3600);
-        long hours = (duration % (24 * 3600)) / 3600;
-        long minutes = (duration % 3600) / 60;
-
-        StringBuilder durationStr = new StringBuilder();
-        if (days > 0) {
-            durationStr.append(days).append(" дн. ");
-        }
-        if (hours > 0) {
-            durationStr.append(hours).append(" ч. ");
-        }
-        if (minutes > 0) {
-            durationStr.append(minutes).append(" мин.");
-        }
-        return durationStr.toString().trim();
-    }
-
-    // Конвертируем текущую цену в целевую валюту
-    private Mono<BigDecimal> convertPriceToTargetCurrency(BigDecimal priceUSD, Currency.Fiat targetCurrency) {
-        return currencyConverter.getUsdToFiatRate(targetCurrency)
-                .map(rate -> priceUSD.multiply(rate).setScale(2, RoundingMode.HALF_UP));
-    }
-
-    // Конвертируем границы в целевую валюту
-    private Mono<BigDecimal> convertBoundaryToTargetCurrency(BigDecimal boundaryUSD, Currency.Fiat targetCurrency) {
-        return currencyConverter.getUsdToFiatRate(targetCurrency)
-                .map(rate -> boundaryUSD.multiply(rate).setScale(2, RoundingMode.HALF_UP));
-    }
-
-    // Рассчитываем границы в целевой валюте
-    private Mono<BigDecimal> calculateBoundaryInTargetCurrency(BigDecimal currentPrice, BigDecimal percentChange, Currency.Fiat targetCurrency) {
-        BigDecimal boundaryUSD = currentPrice.multiply(BigDecimal.ONE.add(percentChange.divide(new BigDecimal("100"), 4, RoundingMode.HALF_UP)));
-        return convertBoundaryToTargetCurrency(boundaryUSD, targetCurrency);
-    }
-
-    // Рассчитываем начальное EMA
-    private BigDecimal calculateInitialEMA(List<BigDecimal> prices) {
-        if (prices.size() < EMA_PERIOD) {
-            return prices.get(prices.size() - 1);
-        }
-        return prices.subList(0, EMA_PERIOD).stream()
-                .reduce(BigDecimal.ZERO, BigDecimal::add)
-                .divide(new BigDecimal(EMA_PERIOD), 2, RoundingMode.HALF_UP);
-    }
-
-    // Не используется для EMA
-    private static final double[] WEIGHTS = {
-            0.0,  // Не используется для EMA
-            0.0,  // Не используется для EMA
-    };
-
-    // Удаляем все нечисловые символы, кроме точки
-    private String cleanNumericString(String input) {
-        return input.replaceAll("[^0-9.]", "");
-    }
-
-    // Получаем начальную цену в целевой валюте
-    private BigDecimal getInitialPriceInTargetCurrency(Notification alert) {
-        return BigDecimal.valueOf(alert.getStartPrice());
-    }
-
-    // Получаем границы в целевой валюте
-    private BigDecimal getBoundaryInTargetCurrency(Notification alert) {
-        return BigDecimal.valueOf(alert.getUpperBoundary());
-    }
-
     // Обновляем EMA
     private void updateEMA(Notification alert, BigDecimal currentPrice) {
         BigDecimal currentEMA = BigDecimal.valueOf(alert.getCurrentEMA());
@@ -659,7 +511,6 @@ public class AlertsHandling {
 
         // Сохраняем обновленное значение EMA
         alert.setCurrentEMA(newEMA.doubleValue());
-        notificationService.save(alert);
 
         // Проверяем пересечение EMA
         checkEMACrossing(alert, currentPrice);
@@ -668,13 +519,19 @@ public class AlertsHandling {
     // Проверяем пересечение EMA
     private void checkEMACrossing(Notification alert, BigDecimal currentPrice) {
         BigDecimal ema = BigDecimal.valueOf(alert.getCurrentEMA());
-        boolean wasAbove = alert.isActive(); // используем старое значение для определения пересечения
-        boolean isAbove = currentPrice.compareTo(ema) > 0;
+        boolean isCurrentlyAbove = currentPrice.compareTo(ema) > 0;
+        
+        // Если isAbove еще не установлен (первая проверка), устанавливаем его
+        if (alert.getIsAbove() == null) {
+            alert.setIsAbove(isCurrentlyAbove);
+            notificationService.save(alert);
+            return;
+        }
 
-        // Если произошло пересечение (изменение состояния)
-        if (wasAbove != isAbove) {
-            alert.setIsActive(isAbove); // сохраняем новое состояние
-            String trendMessage = isAbove ?
+        // Проверяем, произошло ли пересечение
+        if (alert.getIsAbove() != isCurrentlyAbove) {
+            alert.setIsAbove(isCurrentlyAbove);
+            String trendMessage = isCurrentlyAbove ?
                     String.format("🚨 Обнаружен восходящий тренд для %s\n" +
                                     "💰 Текущая цена: %.2f %s\n" +
                                     "📈 EMA: %.2f %s",
@@ -688,7 +545,7 @@ public class AlertsHandling {
                             currentPrice, alert.getFiatCurrency().getCode(),
                             ema, alert.getFiatCurrency().getCode());
 
-            // Отправляем уведомление о смене тренда
+            // Отправляем уведомление только при пересечении
             telegramBotService.sendResponseAsync(alert.getChatId(), trendMessage)
                     .subscribe(
                             null,
