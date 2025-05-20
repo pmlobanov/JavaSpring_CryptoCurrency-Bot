@@ -1,7 +1,9 @@
-package spbstu.mcs.telegramBot.server;
+package spbstu.mcs.telegramBot.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
 import org.springframework.context.annotation.PropertySource;
@@ -34,7 +36,6 @@ import java.util.Map;
 import java.util.HashMap;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
-import spbstu.mcs.telegramBot.config.VaultConfig;
 import spbstu.mcs.telegramBot.service.TelegramBotService;
 import spbstu.mcs.telegramBot.DB.services.NotificationService;
 import spbstu.mcs.telegramBot.service.AlertsHandling;
@@ -43,6 +44,7 @@ import org.springframework.web.reactive.function.server.RouterFunction;
 import org.springframework.web.reactive.function.server.RequestPredicates;
 import org.springframework.web.reactive.function.server.RouterFunctions;
 import org.springframework.web.reactive.function.server.ServerResponse;
+import spbstu.mcs.telegramBot.server.ServerApp;
 import spbstu.mcs.telegramBot.DB.services.AdminService;
 import spbstu.mcs.telegramBot.DB.services.UserService;
 import spbstu.mcs.telegramBot.DB.services.ApiKeyService;
@@ -154,7 +156,7 @@ public class AppConfigurations {
         @Bean
         public RouterFunction<ServerResponse> routerFunction() {
             return RouterFunctions.route(RequestPredicates.GET("/healthcheck"),
-                _ -> ServerResponse.ok().bodyValue("Server is running"));
+                request -> ServerResponse.ok().bodyValue("Server is running"));
         }
 
         /**
@@ -320,8 +322,8 @@ public class AppConfigurations {
         }
         
         @Bean
-        public CryptoInformation cryptoInformation(ObjectMapper objectMapper, CurrencyConverter currencyConverter, PriceFetcher priceFetcher, UserService userService) {
-            return new CryptoInformation(objectMapper, currencyConverter, priceFetcher, userService);
+        public CryptoInformation cryptoInformation(ObjectMapper objectMapper, CurrencyConverter currencyConverter, PriceFetcher priceFetcher) {
+            return new CryptoInformation(objectMapper, currencyConverter, priceFetcher);
         }
         
         @Bean

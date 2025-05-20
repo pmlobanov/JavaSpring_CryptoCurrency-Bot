@@ -4,6 +4,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import spbstu.mcs.telegramBot.model.Currency;
 import spbstu.mcs.telegramBot.cryptoApi.CryptoInformation;
+import spbstu.mcs.telegramBot.service.AlertsHandling;
 import spbstu.mcs.telegramBot.DB.services.UserService;
 import spbstu.mcs.telegramBot.model.User;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -19,8 +20,14 @@ import reactor.core.publisher.Flux;
 import java.math.RoundingMode;
 import spbstu.mcs.telegramBot.cryptoApi.CurrencyConverter;
 import spbstu.mcs.telegramBot.cryptoApi.PriceFetcher;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import java.util.Comparator;
+import java.util.stream.Collectors;
+import java.util.Map;
 import spbstu.mcs.telegramBot.DB.services.PortfolioService;
 import spbstu.mcs.telegramBot.model.Portfolio;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import spbstu.mcs.telegramBot.cryptoApi.CryptoPortfolioManager;
 import spbstu.mcs.telegramBot.DB.services.AdminService;
@@ -47,6 +54,7 @@ public class BotCommand {
     private final PriceFetcher priceFetcher;
     private final PortfolioService portfolioService;
     private final CryptoPortfolioManager cryptoPortfolioManager;
+    private final AdminService adminService;
 
     @Autowired
     public BotCommand(CryptoInformation cryptoInformation, 
@@ -58,7 +66,8 @@ public class BotCommand {
                      CurrencyConverter currencyConverter,
                      PriceFetcher priceFetcher,
                      PortfolioService portfolioService,
-                     CryptoPortfolioManager cryptoPortfolioManager) {
+                     CryptoPortfolioManager cryptoPortfolioManager,
+                     AdminService adminService) {
         this.cryptoInformation = cryptoInformation;
         this.objectMapper = objectMapper;
         this.alertsHandling = alertsHandling;
@@ -69,6 +78,7 @@ public class BotCommand {
         this.priceFetcher = priceFetcher;
         this.portfolioService = portfolioService;
         this.cryptoPortfolioManager = cryptoPortfolioManager;
+        this.adminService = adminService;
     }
 
     /**
@@ -147,6 +157,7 @@ public class BotCommand {
                 "▸ /portfolio - Просмотр портфеля\n" +
                 "▸ /get_portfolio_price - Стоимость портфеля\n" +
                 "▸ /get_assets_price - Цены активов\n" +
+                "▸ /balance - Баланс портфеля\n" +
                 "▸ /delete_asset <валюта> - Удалить актив\n" +
                 "▸ /delete_all_assets - Удалить все активы\n" +
                 "\uD83D\uDD14 Оповещения:\n" +
@@ -176,34 +187,37 @@ public class BotCommand {
         return "\u274C Пожалуйста, укажите одну из следующих криптовалют: BTC, ETH, SOL, XRP, ADA, DOGE, AVAX, NEAR, LTC. Например: /set_crypto BTC";
     }
 
-    public String handlerSetCrypto(String args, String chatId) {
+    public String handlerSetCrypto(String args) {
+        // Process arguments - we expect exactly 1 argument
         String[] processedArgs = processArguments(args, 1);
         if (processedArgs == null) {
             return handlerSetCrypto();
         }
+        
         String cryptoCode = processedArgs[0];
+        
         try {
-            final Currency.Crypto crypto = findCryptoByCode(cryptoCode);
+            // Try to find matching crypto currency
+            Currency.Crypto crypto = null;
+            for (Currency.Crypto c : Currency.Crypto.values()) {
+                if (c.getCode().equalsIgnoreCase(cryptoCode)) {
+                    crypto = c;
+                    break;
+                }
+            }
+            
             if (crypto == null) {
                 return "\u274C Криптовалюта с кодом " + cryptoCode + " не используется. Выберите один из следующих кодов: " +
                        "BTC, ETH, SOL, XRP, ADA, DOGE, AVAX, NEAR, LTC. Например: /set_crypto BTC";
             }
             
-            // Check if the cryptocurrency is already set in the database
-            if (chatId != null) {
-                return userService.getUserByChatId(chatId)
-                    .flatMap(user -> {
-                        if (user.getCurrentCrypto() != null && user.getCurrentCrypto().equals(crypto.getCode())) {
-                            return Mono.just("\u2139\uFE0F Криптовалюта " + crypto.getCode() + " уже установлена как текущая");
-                        }
-                        user.setCurrentCrypto(crypto.getCode());
-                        return userService.save(user)
-                            .then(Mono.just("\uD83D\uDCB1 Криптовалюта по умолчанию обновлена! Теперь базовой криптовалютой для аналитики и сравнений выбран " + crypto.getCode()));
-                    })
-                    .block();
+            // Check if this crypto is already set as current
+            if (crypto == Currency.Crypto.getCurrentCrypto()) {
+                return "\u2139️ Криптовалюта " + crypto.getCode() + " уже установлена в качестве текущей.";
             }
             
-            return "\uD83D\uDCB1 Криптовалюта по умолчанию обновлена! Теперь базовой криптовалютой для аналитики и сравнений выбран " + crypto.getCode();
+            Currency.Crypto.setCurrentCrypto(crypto);
+            return "💱 Криптовалюта по умолчанию обновлена! Теперь базовой криптовалютой для аналитики и сравнений выбран " + crypto.getCode();
         } catch (Exception e) {
             return "Произошла ошибка при установке криптовалюты: " + e.getMessage();
         }
@@ -217,53 +231,46 @@ public class BotCommand {
         return "\u274C Пожалуйста, укажите одну из следующих фиатных валют: USD, EUR, JPY, GBP, RUB, CNY. Например: /set_fiat USD";
     }
 
-    public String handlerSetFiat(String args, String chatId) {
+    public String handlerSetFiat(String args) {
+        // Process arguments - we expect exactly 1 argument
         String[] processedArgs = processArguments(args, 1);
         if (processedArgs == null) {
             return handlerSetFiat();
         }
+        
         String fiatCode = processedArgs[0];
+        
         try {
-            final Currency.Fiat fiat = findFiatByCode(fiatCode);
+            // Try to find matching fiat currency
+            Currency.Fiat fiat = null;
+            for (Currency.Fiat f : Currency.Fiat.values()) {
+                if (f.getCode().equalsIgnoreCase(fiatCode)) {
+                    fiat = f;
+                    break;
+                }
+            }
+            
             if (fiat == null) {
                 return "\u274C Фиатная валюта с кодом " + fiatCode + " не используется. Выберите один из следующих кодов: " +
                        "USD, EUR, JPY, GBP, RUB, CNY. Например: /set_fiat USD";
             }
             
-            // Check if the currency is already set in the database
-            if (chatId != null) {
-                return userService.getUserByChatId(chatId)
-                    .flatMap(user -> {
-                        if (user.getCurrentFiat() != null && user.getCurrentFiat().equals(fiat.getCode())) {
-                            return Mono.just("\u2139\uFE0F Валюта " + fiat.getCode() + " уже установлена как текущая");
-                        }
-                        user.setCurrentFiat(fiat.getCode());
-                        return userService.save(user)
-                            .then(Mono.just("\uD83D\uDCB5 Фиатная валюта обновлена! Теперь все цены будут отображаться в " + fiat.getCode()));
-                    })
-                    .block();
+            if (fiat == Currency.Fiat.getCurrentFiat()) {
+                return "\u2139️ Фиатная валюта " + fiat.getCode() + " уже установлена в качестве текущей.";
             }
             
-            return "\uD83D\uDCB5 Фиатная валюта обновлена! Теперь все цены будут отображаться в " + fiat.getCode();
+            Currency.Fiat.setCurrentFiat(fiat);
+            return "💱 Фиатная валюта обновлена! Теперь все цены будут отображаться в " + fiat.getCode();
         } catch (Exception e) {
             return "Произошла ошибка при установке фиатной валюты: " + e.getMessage();
         }
     }
-
-    private Currency.Fiat findFiatByCode(String code) {
-        for (Currency.Fiat f : Currency.Fiat.values()) {
-            if (f.getCode().equalsIgnoreCase(code)) {
-                return f;
-            }
-        }
-        return null;
-    }
-
+    
     /**
      * Обрабатывает команду /show_current_price
      * @return Текущая цена криптовалюты
      */
-    public Mono<String> handlerShowCurrentPrice(String args, String chatId) {
+    public Mono<String> handlerShowCurrentPrice(String args) {
         log.info("Processing /show_current_price command with args: {}", args);
         // This command expects 0 arguments
         String[] processedArgs = processArguments(args, 0);
@@ -273,15 +280,14 @@ public class BotCommand {
         }
         
         log.info("Calling handlerShowCurrentPrice()");
-        return handlerShowCurrentPrice(chatId)
+        return handlerShowCurrentPrice()
             .doOnNext(response -> log.info("Got response from handlerShowCurrentPrice: {}", response))
             .doOnError(error -> log.error("Error in handlerShowCurrentPrice: {}", error.getMessage()));
     }
     
-    private Mono<String> handlerShowCurrentPrice(String chatId) {
+    private Mono<String> handlerShowCurrentPrice() {
         log.info("Getting current price from cryptoInformation");
-        return userService.getUserByChatId(chatId)
-            .flatMap(user -> cryptoInformation.showCurrentPrice(chatId))
+        return cryptoInformation.showCurrentPrice()
             .doOnNext(jsonPrice -> log.info("Received price data: {}", jsonPrice))
             .map(jsonPrice -> {
                 try {
@@ -311,7 +317,7 @@ public class BotCommand {
                                        "💰 %s (по курсу %s)\n" +
                                        "🔄 Обновлено: Сегодня, %s (UTC+3)",
                                        symbol.split("-")[0], cryptoName, price, 
-                                       symbol.split("-")[1], formattedDate);
+                                       Currency.Fiat.getCurrentFiat().getCode(), formattedDate);
                     
                     log.info("Formatted response: {}", response);
                     return response;
@@ -331,8 +337,8 @@ public class BotCommand {
      * @param period Период времени
      * @return Отформатированная история цен
      */
-    private Mono<String> formatPriceHistory(String period, String chatId) {
-        return cryptoInformation.showPriceHistory(period, chatId)
+    private Mono<String> formatPriceHistory(String period) {
+        return cryptoInformation.showPriceHistory(period)
             .map(jsonPrice -> {
                 try {
                     JsonNode node = objectMapper.readTree(jsonPrice);
@@ -361,7 +367,7 @@ public class BotCommand {
                     // Format the history data
                     StringBuilder historyTable = new StringBuilder();
                     // Шапка таблицы с выравниванием
-                    historyTable.append(String.format("%-17s | %12s\n", "📅 Дата и время", "Цена (" + symbol.split("-")[1] + ")"));
+                    historyTable.append(String.format("%-17s | %12s\n", "📅 Дата и время", "Цена (" + Currency.Fiat.getCurrentFiat().getCode() + ")"));
                     historyTable.append("—————————|———————\n");
     
                     JsonNode history = node.get("history");
@@ -394,7 +400,7 @@ public class BotCommand {
     }
     
     
-    public Mono<String> handlerShowPriceHistory(String args, String chatId) {
+    public Mono<String> handlerShowPriceHistory(String args) {
         // This command expects 1 argument (period)
         String[] processedArgs = processArguments(args, 1);
         if (processedArgs == null) {
@@ -409,7 +415,7 @@ public class BotCommand {
                            "▸ 3d, 7d, 1M - дни");
         }
         
-        return formatPriceHistory(period, chatId);
+        return formatPriceHistory(period);
     }
 
     public String handlerQ() {
@@ -421,7 +427,7 @@ public class BotCommand {
      * @param args Аргументы команды
      * @return Сравнение валют
      */
-    public Mono<String> handlerCompareCurrency(String args, String chatId) {
+    public Mono<String> handlerCompareCurrency(String args) {
         // Process arguments - we expect exactly 3 arguments
         String[] processedArgs = processArguments(args, 3);
         if (processedArgs == null) {
@@ -449,7 +455,7 @@ public class BotCommand {
                                "BTC, ETH, SOL, XRP, ADA, DOGE, AVAX, NEAR, LTC");
             }
             
-            return cryptoInformation.compareCurrencies(crypto1, crypto2, period, chatId)
+            return cryptoInformation.compareCurrencies(crypto1, crypto2, period)
                 .map(json -> {
                     try {
                         JsonNode node = objectMapper.readTree(json);
@@ -476,7 +482,7 @@ public class BotCommand {
                         StringBuilder output = new StringBuilder();
                         output.append(String.format("💱  СРАВНЕНИЕ КУРСОВ (%s)\n\n", period));
 
-                        String currentFiatCode = symbol1.split("-")[1]; // Используем валюту из символа
+                        String currentFiatCode = Currency.Fiat.getCurrentFiat().getCode(); 
                         
                         // First crypto
                         output.append(String.format("💰 %s (%s)\n", crypto1Code, crypto1Name));
@@ -746,16 +752,14 @@ public class BotCommand {
                     // Показываем всю информацию об алерте
                     switch (type) {
                         case "VALUE" -> {
-                            message.append(String.format("   Начальная цена: %.2f %s\n", 
-                                notification.getStartPrice(), fiat));
                             message.append(String.format("   Верхняя граница: %.2f %s\n", 
                                 notification.getUpperBoundary(), fiat));
                             message.append(String.format("   Нижняя граница: %.2f %s\n", 
                                 notification.getLowerBoundary(), fiat));
-                            }
-                        case "PERCENT" -> {
                             message.append(String.format("   Начальная цена: %.2f %s\n", 
                                 notification.getStartPrice(), fiat));
+                        }
+                        case "PERCENT" -> {
                             message.append(String.format("   Рост: +%.2f%%\n", 
                                 notification.getUpPercent()));
                             message.append(String.format("   Падение: -%.2f%%\n", 
@@ -764,14 +768,16 @@ public class BotCommand {
                                 notification.getUpperBoundary(), fiat));
                             message.append(String.format("   Нижняя граница: %.2f %s\n", 
                                 notification.getLowerBoundary(), fiat));
+                            message.append(String.format("   Начальная цена: %.2f %s\n", 
+                                notification.getStartPrice(), fiat));
                         }
                         case "EMA" -> {
-                            message.append(String.format("  Начальная цена: %.2f %s\n", 
-                                notification.getStartPrice(), fiat));
                             message.append(String.format("   Начальное EMA: %.2f %s\n", 
                                 notification.getStartEMA(), fiat));
                             message.append(String.format("   Текущее EMA: %.2f %s\n", 
                                 notification.getCurrentEMA(), fiat));
+                            message.append(String.format("   Начальная цена: %.2f %s\n", 
+                                notification.getStartPrice(), fiat));
                         }
                     }
                     
@@ -783,7 +789,7 @@ public class BotCommand {
                             message.append(String.format("   Время срабатывания: %s\n", 
                                 formatDuration(notification.getTriggerTimestamp())));
                         } else {
-                            message.append(String.format("Начало работы: %s\n", 
+                            message.append(String.format("   Время работы: %s\n", 
                                 formatDuration(notification.getStartTimestamp())));
                         }
                     } else {
@@ -847,7 +853,7 @@ public class BotCommand {
         return "❌ Неверный формат команды!\n" +
                "Используйте: /delete_alert <тип> <криптовалюта>\n" +
                "Пример: /delete_alert VALUE BTC\n" +
-               "Типы алертов: VAL, PERC, EMA";
+               "Типы алертов: VALUE, PERCENT, EMA";
     }
 
     public Mono<String> handlerDeleteAlert(String args, String chatId) {
@@ -960,7 +966,7 @@ public class BotCommand {
                     .flatMap(cmd -> {
                         log.info("User has started (empty check), processing command: {}", cmd);
                         return processCommandInternal(cmd, args, chatId);
-                }));
+                    }));
         }
         log.info("Processing /start command");
         return processCommandInternal(command, args, chatId);
@@ -1001,29 +1007,28 @@ public class BotCommand {
                             log.info("Creating brand new user with chatId: {}", id);
                             User newUser = new User(id);
                             newUser.setHasStarted(true);
-                            // Set default values for currencies
-                            newUser.setCurrentFiat(Currency.Fiat.USD.getCode());
-                            newUser.setCurrentCrypto(Currency.Crypto.BTC.getCode());
                             return userService.save(newUser)
-                                .doOnSuccess(u -> log.info("Successfully created new user with hasStarted=true and default currencies"))
+                                .doOnSuccess(u -> log.info("Successfully created new user with hasStarted=true"))
                                 .doOnError(e -> log.error("Error creating new user: {}", e.getMessage()))
                                 .then(telegramBotService.sendResponseAsync(id, handlerStart(argsStr)));
-                    }));
+                        }));
             }
             case "/help" -> telegramBotService.sendResponseAsync(chatId, handlerHelp(argsStr));
-            case "/set_crypto" -> telegramBotService.sendResponseAsync(chatId, handlerSetCrypto(argsStr, chatId));
-            case "/set_fiat" -> telegramBotService.sendResponseAsync(chatId, handlerSetFiat(argsStr, chatId));
-            case "/show_current_price" -> handlerShowCurrentPrice(argsStr, chatId)
+            case "/set_crypto" -> telegramBotService.sendResponseAsync(chatId, handlerSetCrypto(argsStr));
+            case "/set_fiat" -> telegramBotService.sendResponseAsync(chatId, handlerSetFiat(argsStr));
+            case "/show_current_price" -> handlerShowCurrentPrice(argsStr)
                 .flatMap(response -> telegramBotService.sendResponseAsync(chatId, response));
-            case "/show_price_history" -> handlerShowPriceHistory(argsStr, chatId)
+            case "/show_price_history" -> handlerShowPriceHistory(argsStr)
                 .flatMap(response -> telegramBotService.sendResponseAsync(chatId, response));
-            case "/compare_currency" -> handlerCompareCurrency(argsStr, chatId)
+            case "/compare_currency" -> handlerCompareCurrency(argsStr)
                 .flatMap(response -> telegramBotService.sendResponseAsync(chatId, response));
             case "/portfolio" -> handlerPortfolio(argsStr, chatId)
                 .flatMap(response -> telegramBotService.sendResponseAsync(chatId, response));
-            case "/get_portfolio_price" -> handlerGetPortfolioPrice(chatId)
+            case "/get_portfolio_price" -> handlerGetPortfolioPrice(argsStr, chatId)
                 .flatMap(response -> telegramBotService.sendResponseAsync(chatId, response));
             case "/get_assets_price" -> handlerGetPortfolioAssets(argsStr, chatId)
+                .flatMap(response -> telegramBotService.sendResponseAsync(chatId, response));
+            case "/balance" -> handlerBalance(chatId)
                 .flatMap(response -> telegramBotService.sendResponseAsync(chatId, response));
             case "/set_alert_val" -> handlerSetAlertVal(argsStr, chatId)
                 .flatMap(response -> telegramBotService.sendResponseAsync(chatId, response));
@@ -1052,6 +1057,17 @@ public class BotCommand {
         };
     }
 
+    /**
+     * Обрабатывает команду /add
+     * @return Сообщение об ошибке формата
+     */
+    private String handlerAdd() {
+        return "❌ Неверный формат команды!\n" +
+               "Используйте: /add <количество> <криптовалюта>\n" +
+               "Пример: /add 0.42 ETH\n" +
+               "Доступные криптовалюты: BTC, ETH, SOL, XRP, ADA, DOGE, AVAX, NEAR, LTC";
+    }
+
     public Mono<String> handlerAdd(String[] args, String chatId) {
         if (args.length != 2) {
             return Mono.just("❌ Неверный формат команды!\n" +
@@ -1070,74 +1086,156 @@ public class BotCommand {
 
             // Получаем портфель пользователя для конкретной криптовалюты
             List<Portfolio> portfolios = portfolioService.getPortfoliosByChatId(chatId);
+            final Portfolio portfolio;
             
-            // Находим существующий портфель или создаем новый
-            Portfolio portfolio = portfolios.stream()
-                .filter(p -> p.getCryptoCurrency() != null && p.getCryptoCurrency().equals(crypto))
-                .findFirst()
-                .orElseGet(() -> {
-                    Portfolio newPortfolio = new Portfolio(chatId);
-                    newPortfolio.setCryptoCurrency(crypto);
-                    newPortfolio.setCount(BigDecimal.ZERO);
-                    return portfolioService.save(newPortfolio);
-                });
-
-            return userService.getUserByChatId(chatId)
-                .flatMap(user -> {
-                    Currency.Fiat userFiat = Currency.Fiat.valueOf(user.getCurrentFiat());
-                    return Mono.zip(
-                        priceFetcher.getCurrentPrice(crypto),
-                        currencyConverter.getUsdToFiatRate(userFiat)
-                    ).flatMap(tuple -> {
-                        try {
-                            JsonNode node = objectMapper.readTree(tuple.getT1());
-                            BigDecimal currentPriceUSD = new BigDecimal(node.get("price").asText());
-                            BigDecimal conversionRate = tuple.getT2();
-                            
-                            // Конвертируем цену в выбранную пользователем валюту
-                            BigDecimal currentPrice = currentPriceUSD.multiply(conversionRate)
-                                .setScale(2, RoundingMode.HALF_UP);
-                            
-                            try {
-                                // Добавляем криптовалюту в портфель
-                                Portfolio updatedPortfolio = portfolioService.addCryptoToPortfolio(portfolio.getId(), crypto, amount);
-                                
-                                // Рассчитываем общую стоимость в выбранной валюте
-                                BigDecimal totalValue = amount.multiply(currentPrice);
-                                BigDecimal totalAmount = updatedPortfolio.getCount();
-                                BigDecimal totalPortfolioValue = totalAmount.multiply(currentPrice);
-                                
-                                String response = String.format("✅ Добавлено %.6f %s\n" +
-                                        "💰 Текущая цена: %.2f %s\n" +
-                                        "💵 Стоимость: %.2f %s\n\n" +
-                                        "📊 Всего в портфеле: %.6f %s\n" +
-                                        "💎 Общая стоимость актива: %.2f %s",
-                                        amount.setScale(6, RoundingMode.FLOOR), crypto.getCode(),
-                                        currentPrice, userFiat.getCode(),
-                                        totalValue, userFiat.getCode(),
-                                        totalAmount.setScale(6, RoundingMode.FLOOR), crypto.getCode(),
-                                        totalPortfolioValue, userFiat.getCode());
-
-                                // Обновляем цену в базе данных после формирования ответа
-                                return cryptoPortfolioManager.updatePortfolioPrices(chatId)
-                                    .thenReturn(response);
-                            } catch (IllegalArgumentException e) {
-                                return Mono.just("❌ " + e.getMessage());
-                            }
-                        } catch (Exception e) {
-                            log.error("Ошибка при обработке данных о цене", e);
-                            return Mono.just("❌ Ошибка при получении цены криптовалюты");
+            if (portfolios.stream()
+                    .filter(p -> p.getCryptoCurrency() != null && p.getCryptoCurrency().equals(crypto))
+                    .findFirst()
+                    .orElse(null) == null) {
+                // Если портфеля для этой криптовалюты нет, создаем новый
+                return userService.getUserByChatId(chatId)
+                    .flatMap(user -> {
+                        if (user == null) {
+                            return Mono.just("❌ Пожалуйста, начните с команды /start");
                         }
+                        return portfolioService.createPortfolio(chatId)
+                            .flatMap(newPortfolio -> {
+                                newPortfolio.setCryptoCurrency(crypto);
+                                final Portfolio currentPortfolio = newPortfolio;
+                                return priceFetcher.getCurrentPrice(crypto)
+                                    .flatMap(priceJson -> {
+                                        try {
+                                            JsonNode node = objectMapper.readTree(priceJson);
+                                            BigDecimal currentPrice = new BigDecimal(node.get("price").asText());
+                                            BigDecimal totalValue = amount.multiply(currentPrice);
+                                            
+                                            // Добавляем криптовалюту в портфель
+                                            Portfolio updatedPortfolio = portfolioService.addCryptoToPortfolio(currentPortfolio.getId(), crypto, amount);
+                                            
+                                            // Обновляем последнюю известную цену
+                                            updatedPortfolio.setLastCryptoPrice(currentPrice);
+                                            updatedPortfolio.setLastCryptoPriceTimestamp(System.currentTimeMillis() / 1000);
+                                            portfolioService.save(updatedPortfolio);
+                                            
+                                            return Mono.just(String.format("✅ Добавлено %.6f %s\n" +
+                                                    "💰 Текущая цена: %.2f %s\n" +
+                                                    "💵 Стоимость: %.2f %s\n\n" +
+                                                    "📊 Всего в портфеле: %.6f %s\n" +
+                                                    "💎 Общая стоимость актива: %.2f %s",
+                                                    amount.setScale(6, RoundingMode.FLOOR), crypto.getCode(),
+                                                    currentPrice, Currency.Fiat.getCurrentFiat().getCode(),
+                                                    totalValue, Currency.Fiat.getCurrentFiat().getCode(),
+                                                    amount.setScale(6, RoundingMode.HALF_UP), crypto.getCode(),
+                                                    totalValue, Currency.Fiat.getCurrentFiat().getCode()));
+                                        } catch (Exception e) {
+                                            return Mono.just("❌ Ошибка при обработке цены: " + e.getMessage());
+                                        }
+                                    });
+                            });
                     });
-                });
+            } else {
+                portfolio = portfolios.stream()
+                    .filter(p -> p.getCryptoCurrency() != null && p.getCryptoCurrency().equals(crypto))
+                    .findFirst()
+                    .get();
+            }
+
+            // Получаем текущую цену криптовалюты
+            return Mono.zip(
+                priceFetcher.getCurrentPrice(crypto),
+                currencyConverter.getUsdToFiatRate(Currency.Fiat.getCurrentFiat())
+            ).flatMap(tuple -> {
+                try {
+                    JsonNode node = objectMapper.readTree(tuple.getT1());
+                    BigDecimal currentPriceUSD = new BigDecimal(node.get("price").asText());
+                    BigDecimal conversionRate = tuple.getT2();
+                    
+                    // Конвертируем цену в выбранную пользователем валюту
+                    BigDecimal currentPrice = currentPriceUSD.multiply(conversionRate)
+                        .setScale(2, RoundingMode.HALF_UP);
+                    
+                    // Добавляем криптовалюту в портфель
+                    Portfolio updatedPortfolio = portfolioService.addCryptoToPortfolio(portfolio.getId(), crypto, amount);
+                    
+                    // Обновляем последнюю известную цену (храним в USD)
+                    updatedPortfolio.setLastCryptoPrice(currentPriceUSD);
+                    updatedPortfolio.setLastCryptoPriceTimestamp(System.currentTimeMillis() / 1000);
+                    portfolioService.save(updatedPortfolio);
+                    
+                    // Рассчитываем общую стоимость в выбранной валюте
+                    BigDecimal totalValue = amount.multiply(currentPrice);
+                    BigDecimal totalAmount = updatedPortfolio.getCount();
+                    BigDecimal totalPortfolioValue = totalAmount.multiply(currentPrice);
+                    
+                    return Mono.just(String.format("✅ Добавлено %.6f %s\n" +
+                            "💰 Текущая цена: %.2f %s\n" +
+                            "💵 Стоимость: %.2f %s\n\n" +
+                            "📊 Всего в портфеле: %.6f %s\n" +
+                            "💎 Общая стоимость актива: %.2f %s",
+                            amount.setScale(6, RoundingMode.HALF_UP), crypto.getCode(),
+                            currentPrice, Currency.Fiat.getCurrentFiat().getCode(),
+                            totalValue, Currency.Fiat.getCurrentFiat().getCode(),
+                            totalAmount.setScale(6, RoundingMode.HALF_UP), crypto.getCode(),
+                            totalPortfolioValue, Currency.Fiat.getCurrentFiat().getCode()));
+                } catch (Exception e) {
+                    log.error("Ошибка при обработке данных о цене", e);
+                    return Mono.just("❌ Ошибка при получении цены криптовалюты");
+                }
+            });
         } catch (NumberFormatException e) {
-            return Mono.just("❌ Неверный формат числа!");
+            return Mono.just("❌ Неверный формат числа");
         } catch (IllegalArgumentException e) {
-            return Mono.just("❌ Неверный код криптовалюты! Используйте: BTC, ETH, SOL, XRP, ADA, DOGE, AVAX, NEAR, LTC");
-        } catch (Exception e) {
-            log.error("Ошибка при добавлении криптовалюты", e);
-            return Mono.just("❌ Произошла ошибка при добавлении криптовалюты");
+            return Mono.just("❌ Неизвестная криптовалюта. Доступные: BTC, ETH, SOL, XRP, ADA, DOGE, AVAX, NEAR, LTC");
         }
+    }
+
+    public Mono<String> handlerBalance(String chatId) {
+        List<Portfolio> portfolios = portfolioService.getPortfoliosByChatId(chatId);
+        if (portfolios.isEmpty()) {
+            return Mono.just("❌ Ваш портфель пуст. Используйте команду /add для создания портфеля и добавления криптовалюты.");
+        }
+
+        final Portfolio portfolio = portfolios.get(0);
+        if (portfolio.getCryptoCurrency() == null) {
+            return Mono.just("Ваш портфель пуст. Используйте команду /add для добавления криптовалюты.");
+        }
+
+        return Mono.zip(
+            priceFetcher.getCurrentPrice(portfolio.getCryptoCurrency()),
+            currencyConverter.getUsdToFiatRate(Currency.Fiat.getCurrentFiat())
+        ).flatMap(tuple -> {
+            try {
+                JsonNode node = objectMapper.readTree(tuple.getT1());
+                BigDecimal currentPriceUSD = new BigDecimal(node.get("price").asText());
+                BigDecimal conversionRate = tuple.getT2();
+                
+                // Конвертируем цену в выбранную пользователем валюту
+                BigDecimal currentPrice = currentPriceUSD.multiply(conversionRate)
+                    .setScale(2, RoundingMode.HALF_UP);
+                
+                // Рассчитываем общую стоимость в выбранной валюте
+                BigDecimal totalValue = portfolio.getCount().multiply(currentPrice);
+                
+                // Обновляем последнюю известную цену (храним в USD)
+                Portfolio updatedPortfolio = portfolioService.save(portfolio);
+                updatedPortfolio.setLastCryptoPrice(currentPriceUSD);
+                updatedPortfolio.setLastCryptoPriceTimestamp(System.currentTimeMillis() / 1000);
+                portfolioService.save(updatedPortfolio);
+                
+                return Mono.just(String.format("💰 Баланс портфеля:\n\n" +
+                        "Криптовалюта: %s\n" +
+                        "Количество: %.6f\n" +
+                        "Текущая цена: %.2f %s\n" +
+                        "Общая стоимость: %.2f %s",
+                        portfolio.getCryptoCurrency().getCode(),
+                        portfolio.getCount().setScale(6, RoundingMode.HALF_UP),
+                        currentPrice, Currency.Fiat.getCurrentFiat().getCode(),
+                        totalValue, Currency.Fiat.getCurrentFiat().getCode()));
+            } catch (Exception e) {
+                log.error("Ошибка при обработке данных о цене", e);
+                return Mono.just("❌ Ошибка при получении цены криптовалюты");
+            }
+        });
     }
 
     /**
@@ -1166,76 +1264,63 @@ public class BotCommand {
 
             // Получаем портфель пользователя для конкретной криптовалюты
             List<Portfolio> portfolios = portfolioService.getPortfoliosByChatId(chatId);
-            
-            // Если портфелей нет или нет портфеля с нужной криптовалютой
-            if (portfolios.isEmpty() || portfolios.stream()
-                    .noneMatch(p -> p.getCryptoCurrency() != null && p.getCryptoCurrency().equals(crypto))) {
-                return Mono.just(String.format("❌ В вашем портфеле нет криптовалюты %s", crypto.getCode()));
-            }
-
-            // Получаем существующий портфель
             final Portfolio portfolio = portfolios.stream()
                 .filter(p -> p.getCryptoCurrency() != null && p.getCryptoCurrency().equals(crypto))
                 .findFirst()
-                .orElseThrow(() -> new IllegalStateException("Портфель не найден"));
+                .orElse(null);
+
+            if (portfolio == null) {
+                return Mono.just(String.format("❌ В вашем портфеле нет криптовалюты %s", crypto.getCode()));
+            }
 
             // Проверяем, достаточно ли средств для удаления
             if (portfolio.getCount().compareTo(amount) < 0) {
                 return Mono.just(String.format("❌ Недостаточно средств. В портфеле: %.6f %s", 
-                    portfolio.getCount().setScale(6, RoundingMode.FLOOR), crypto.getCode()));
+                    portfolio.getCount().setScale(6, RoundingMode.HALF_UP), crypto.getCode()));
             }
 
-            return userService.getUserByChatId(chatId)
-                .flatMap(user -> {
-                    Currency.Fiat userFiat = Currency.Fiat.valueOf(user.getCurrentFiat());
-                    return Mono.zip(
-                        priceFetcher.getCurrentPrice(crypto),
-                        currencyConverter.getUsdToFiatRate(userFiat)
-                    ).flatMap(tuple -> {
-                        try {
-                            JsonNode node = objectMapper.readTree(tuple.getT1());
-                            BigDecimal currentPriceUSD = new BigDecimal(node.get("price").asText());
-                            BigDecimal conversionRate = tuple.getT2();
-                            
-                            // Конвертируем цену в выбранную пользователем валюту
-                            BigDecimal currentPrice = currentPriceUSD.multiply(conversionRate)
-                                .setScale(2, RoundingMode.HALF_UP);
-                            
-                            try {
-                                // Уменьшаем количество криптовалюты в портфеле
-                                Portfolio updatedPortfolio = portfolioService.removeCryptoFromPortfolio(portfolio.getId(), crypto, amount);
-                                
-                                // Рассчитываем общую стоимость в выбранной валюте
-                                BigDecimal totalValue = amount.multiply(currentPrice);
-                                BigDecimal totalAmount = updatedPortfolio.getCount();
-                                BigDecimal totalPortfolioValue = totalAmount.multiply(currentPrice);
-                                
-                                String response = String.format("✅ Удалено %.6f %s\n\n" +
-                                        "📊 Всего в портфеле: %.6f %s\n" +
-                                        "💎 Общая стоимость актива: %.2f %s",
-                                        amount.setScale(6, RoundingMode.FLOOR), crypto.getCode(),
-                                        totalAmount.setScale(6, RoundingMode.FLOOR), crypto.getCode(),
-                                        totalPortfolioValue, userFiat.getCode());
-
-                                // Обновляем цену в базе данных после формирования ответа
-                                return cryptoPortfolioManager.updatePortfolioPrices(chatId)
-                                    .thenReturn(response);
-                            } catch (IllegalArgumentException e) {
-                                return Mono.just("❌ " + e.getMessage());
-                            }
-                        } catch (Exception e) {
-                            log.error("Ошибка при обработке данных о цене", e);
-                            return Mono.just("❌ Ошибка при получении цены криптовалюты");
-                        }
-                    });
-                });
+            // Получаем текущую цену криптовалюты
+            return Mono.zip(
+                priceFetcher.getCurrentPrice(crypto),
+                currencyConverter.getUsdToFiatRate(Currency.Fiat.getCurrentFiat())
+            ).flatMap(tuple -> {
+                try {
+                    JsonNode node = objectMapper.readTree(tuple.getT1());
+                    BigDecimal currentPriceUSD = new BigDecimal(node.get("price").asText());
+                    BigDecimal conversionRate = tuple.getT2();
+                    
+                    // Конвертируем цену в выбранную пользователем валюту
+                    BigDecimal currentPrice = currentPriceUSD.multiply(conversionRate)
+                        .setScale(2, RoundingMode.HALF_UP);
+                    
+                    // Уменьшаем количество криптовалюты в портфеле
+                    Portfolio updatedPortfolio = portfolioService.removeCryptoFromPortfolio(portfolio.getId(), crypto, amount);
+                    
+                    // Обновляем последнюю известную цену (храним в USD)
+                    updatedPortfolio.setLastCryptoPrice(currentPriceUSD);
+                    updatedPortfolio.setLastCryptoPriceTimestamp(System.currentTimeMillis() / 1000);
+                    portfolioService.save(updatedPortfolio);
+                    
+                    // Рассчитываем общую стоимость в выбранной валюте
+                    BigDecimal totalValue = amount.multiply(currentPrice);
+                    BigDecimal totalAmount = updatedPortfolio.getCount();
+                    BigDecimal totalPortfolioValue = totalAmount.multiply(currentPrice);
+                    
+                    return Mono.just(String.format("✅ Удалено %.6f %s\n\n" +
+                            "📊 Всего в портфеле: %.6f %s\n" +
+                            "💎 Общая стоимость актива: %.2f %s",
+                            amount.setScale(6, RoundingMode.HALF_UP), crypto.getCode(),
+                            totalAmount.setScale(6, RoundingMode.HALF_UP), crypto.getCode(),
+                            totalPortfolioValue, Currency.Fiat.getCurrentFiat().getCode()));
+                } catch (Exception e) {
+                    log.error("Ошибка при обработке данных о цене", e);
+                    return Mono.just("❌ Ошибка при получении цены криптовалюты");
+                }
+            });
         } catch (NumberFormatException e) {
-            return Mono.just("❌ Неверный формат числа!");
+            return Mono.just("❌ Неверный формат числа");
         } catch (IllegalArgumentException e) {
-            return Mono.just("❌ Неверный код криптовалюты! Используйте: BTC, ETH, SOL, XRP, ADA, DOGE, AVAX, NEAR, LTC");
-        } catch (Exception e) {
-            log.error("Ошибка при удалении криптовалюты", e);
-            return Mono.just("❌ Произошла ошибка при удалении криптовалюты");
+            return Mono.just("❌ Неизвестная криптовалюта. Доступные: BTC, ETH, SOL, XRP, ADA, DOGE, AVAX, NEAR, LTC");
         }
     }
 
@@ -1251,25 +1336,22 @@ public class BotCommand {
         if (processedArgs == null) {
             return Mono.just("❌ Команда /portfolio не принимает аргументов");
         }
-        return cryptoPortfolioManager.getPortfolioInfo(chatId)
-            .flatMap(response -> 
-                telegramBotService.sendResponseAsync(chatId, response)
-                    .then(cryptoPortfolioManager.updatePortfolioPrices(chatId))
-                    .then(Mono.empty())
-            );
+        return cryptoPortfolioManager.getPortfolioInfo(chatId);
     }
 
     /**
      * Обрабатывает команду /get_portfolio_price
+     * @param args Аргументы команды
      * @param chatId ID чата пользователя
      * @return Информация о стоимости портфеля
      */
-    private Mono<String> handlerGetPortfolioPrice(String chatId) {
-        return cryptoPortfolioManager.getPortfolioPriceInfo(chatId)
-            .flatMap(response -> 
-                cryptoPortfolioManager.updatePortfolioPrices(chatId)
-                    .thenReturn(response)
-            );
+    public Mono<String> handlerGetPortfolioPrice(String args, String chatId) {
+        // This command expects 0 arguments
+        String[] processedArgs = processArguments(args, 0);
+        if (processedArgs == null) {
+            return Mono.just("❌ Команда /get_portfolio_price не принимает аргументов");
+        }
+        return cryptoPortfolioManager.getPortfolioPriceInfo(chatId);
     }
 
     /**
@@ -1319,29 +1401,7 @@ public class BotCommand {
         try {
             String cryptoCode = processedArgs[0].toUpperCase();
             Currency.Crypto crypto = Currency.Crypto.valueOf(cryptoCode);
-
-            // Получаем портфель пользователя для конкретной криптовалюты
-            List<Portfolio> portfolios = portfolioService.getPortfoliosByChatId(chatId);
-            
-            // Если портфелей нет или нет портфеля с нужной криптовалютой
-            if (portfolios.isEmpty() || portfolios.stream()
-                    .noneMatch(p -> p.getCryptoCurrency() != null && p.getCryptoCurrency().equals(crypto))) {
-                return Mono.just(String.format("❌ В вашем портфеле нет криптовалюты %s", crypto.getCode()));
-            }
-
-            // Получаем существующий портфель
-            final Portfolio portfolio = portfolios.stream()
-                .filter(p -> p.getCryptoCurrency() != null && p.getCryptoCurrency().equals(crypto))
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException("Портфель не найден"));
-
-            // Удаляем портфель из базы данных и дожидаемся завершения операции
-            return portfolioService.delete(portfolio)
-                .then(Mono.just(String.format("✅ Криптовалюта %s успешно удалена из портфеля", crypto.getCode())))
-                .onErrorResume(e -> {
-                    log.error("Ошибка при удалении криптовалюты из портфеля", e);
-                    return Mono.just("❌ Ошибка при удалении криптовалюты из портфеля");
-                });
+            return cryptoPortfolioManager.deleteAsset(chatId, crypto);
         } catch (IllegalArgumentException e) {
             return Mono.just("❌ Неизвестная криптовалюта. Доступные: BTC, ETH, SOL, XRP, ADA, DOGE, AVAX, NEAR, LTC");
         }
@@ -1372,10 +1432,6 @@ public class BotCommand {
         if (processedArgs == null) {
             return Mono.just("❌ Команда /get_assets_price не принимает аргументов");
         }
-        return cryptoPortfolioManager.getAssetsPrice(chatId)
-            .flatMap(response -> 
-                cryptoPortfolioManager.updatePortfolioPrices(chatId)
-                    .thenReturn(response)
-            );
+        return cryptoPortfolioManager.getAssetsPrice(chatId);
     }
 }
