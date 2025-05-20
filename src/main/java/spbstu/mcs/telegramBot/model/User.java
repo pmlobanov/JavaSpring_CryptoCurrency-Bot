@@ -1,12 +1,9 @@
 package spbstu.mcs.telegramBot.model;
 
 import org.springframework.data.annotation.Id;
-import org.springframework.data.annotation.PersistenceConstructor;
-import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
-import spbstu.mcs.telegramBot.model.Currency;
-import java.beans.ConstructorProperties;
+
 
 import java.util.ArrayList;
 import java.util.List;
@@ -50,6 +47,12 @@ public class User {
     @Field("notificationIds")
     private List<String> notificationIds;
 
+    @Field("currentFiat")
+    private String currentFiat;
+
+    @Field("currentCrypto")
+    private String currentCrypto;
+
     /**
      * Конструктор без параметров для Spring Data MongoDB
      */
@@ -57,6 +60,8 @@ public class User {
         this.portfolioIds = new ArrayList<>();
         this.notificationIds = new ArrayList<>();
         this.hasStarted = false;
+        this.currentCrypto = Currency.Crypto.BTC.getCode();
+        this.currentFiat = Currency.Fiat.USD.getCode();
     }
 
     /**
@@ -75,10 +80,10 @@ public class User {
      * @param notificationIds список идентификаторов уведомлений
      */
     public User(String chatId, List<String> portfolioIds, List<String> notificationIds) {
+        this();
         this.chatId = chatId;
         this.portfolioIds = portfolioIds != null ? portfolioIds : new ArrayList<>();
         this.notificationIds = notificationIds != null ? notificationIds : new ArrayList<>();
-        this.hasStarted = false;
     }
 
     /**
@@ -193,6 +198,8 @@ public class User {
                 ", hasStarted=" + hasStarted +
                 ", portfolioIds=" + portfolioIds +
                 ", notificationIds=" + notificationIds +
+                ", currentFiat='" + currentFiat + '\'' +
+                ", currentCrypto='" + currentCrypto + '\'' +
                 '}';
     }
 
@@ -202,5 +209,25 @@ public class User {
 
     public void setHasStarted(boolean hasStarted) {
         this.hasStarted = hasStarted;
+    }
+
+    public String getCurrentFiat() {
+        return currentFiat;
+    }
+
+    public void setCurrentFiat(String currentFiat) {
+        this.currentFiat = currentFiat;
+    }
+
+    public Currency.Fiat getFiatCurrency() {
+        return Currency.Fiat.valueOf(currentFiat);
+    }
+
+    public String getCurrentCrypto() {
+        return currentCrypto;
+    }
+
+    public void setCurrentCrypto(String currentCrypto) {
+        this.currentCrypto = currentCrypto;
     }
 }

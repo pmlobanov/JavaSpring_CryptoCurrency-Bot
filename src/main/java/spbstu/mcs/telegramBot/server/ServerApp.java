@@ -12,7 +12,6 @@ import reactor.core.publisher.Mono;
 import spbstu.mcs.telegramBot.DB.services.AdminService;
 import spbstu.mcs.telegramBot.DB.services.ApiKeyService;
 import spbstu.mcs.telegramBot.DB.services.UserService;
-import spbstu.mcs.telegramBot.config.AppConfigurations;
 import spbstu.mcs.telegramBot.cryptoApi.PriceFetcher;
 import spbstu.mcs.telegramBot.model.Admin;
 import spbstu.mcs.telegramBot.model.Currency;
@@ -30,11 +29,9 @@ public class ServerApp {
     private static final Logger logger = LoggerFactory.getLogger(ServerApp.class);
     private HttpServer server;
     private final AppConfigurations.WebConfiguration.ServerProperties serverProperties;
-    private final RouterFunction<ServerResponse> routes;
     private final AdminService adminService;
     private final UserService userService;
     private final EncryptionService encryptionService;
-    private final ApiKeyService apiKeyService;
     private final PriceFetcher priceFetcher;
     private final String logFilePath;
     
@@ -56,11 +53,9 @@ public class ServerApp {
                     String kafkaIncomingTopic,
                     String kafkaOutgoingTopic) {
         this.serverProperties = serverProperties;
-        this.routes = routes;
         this.adminService = adminService;
         this.userService = userService;
         this.encryptionService = encryptionService;
-        this.apiKeyService = apiKeyService;
         this.priceFetcher = priceFetcher;
         this.logFilePath = logFilePath;
         this.kafkaBootstrapServers = kafkaBootstrapServers;
@@ -179,8 +174,10 @@ public class ServerApp {
                     }
                     
                     // Read request body
-                    String requestBody = new BufferedReader(new InputStreamReader(exchange.getRequestBody()))
-                            .lines().collect(Collectors.joining("\n"));
+                    String requestBody;
+                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(exchange.getRequestBody()))) {
+                        requestBody = reader.lines().collect(Collectors.joining("\n"));
+                    }
                     
                     try {
                         Map<String, Object> body = objectMapper.readValue(requestBody, Map.class);
@@ -221,16 +218,15 @@ public class ServerApp {
                                         
                                         Admin admin = optAdmin.get();
                         String apiKey = java.util.UUID.randomUUID().toString();
-                        String encryptedKey = encryptionService.encrypt(apiKey);
                         LocalDateTime expirationDate = LocalDateTime.now().plusDays(30);
                                         
                         Map<String, Object> responseMap = new LinkedHashMap<>();
                         
                         // Update the admin with the new key
                         adminService.updateApiKey(admin.getUsername(), expirationDate)
-                            .subscribe(updatedAdmin -> {
+                            .subscribe(_ -> {
                                 responseMap.put("message", "Admin token refreshed successfully");
-                                responseMap.put("username", updatedAdmin.getUsername());
+                                responseMap.put("username", admin.getUsername());
                             });
                         
                         responseMap.put("apiKey", apiKey);
@@ -337,7 +333,7 @@ public class ServerApp {
                         // Если ключ истек, обновляем его и возвращаем соответствующее сообщение
                         if (keyExpired && foundAdmin != null) {
                             adminService.updateApiKey(foundAdmin.getUsername(), LocalDateTime.now().plusDays(30))
-                                .subscribe(updatedAdmin -> {
+                                .subscribe(_ -> {
                                     // Key has been updated
                                 });
                             
@@ -749,12 +745,12 @@ public class ServerApp {
     // Helper method to refresh an expired key
     private Mono<Map<String, Object>> refreshExpiredKey(Admin admin, OutputStream outputStream) {
         String newApiKey = java.util.UUID.randomUUID().toString();
-        String newEncryptedKey = encryptionService.encrypt(newApiKey);
+
         LocalDateTime expirationDate = LocalDateTime.now().plusDays(30);
         
         // Update admin with new key
         adminService.updateApiKey(admin.getUsername(), expirationDate)
-            .subscribe(updatedAdmin -> {
+            .subscribe(_ -> {
                 // Key has been updated
             });
         

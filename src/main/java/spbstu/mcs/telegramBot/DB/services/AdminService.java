@@ -84,7 +84,7 @@ public class AdminService {
                 
                 return admin;
             }
-            
+                
             log.warn("No matching API key found among {} admins", admins.size());
             return null;
         })

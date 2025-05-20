@@ -8,19 +8,13 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
-import org.telegram.telegrambots.meta.api.objects.Message;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
-import org.springframework.beans.factory.annotation.Qualifier;
 import spbstu.mcs.telegramBot.DB.services.UserService;
 import spbstu.mcs.telegramBot.model.User;
-import org.telegram.telegrambots.meta.api.objects.Chat;
 import org.springframework.beans.factory.annotation.Value;
 import spbstu.mcs.telegramBot.util.ChatIdMasker;
 
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 import reactor.core.publisher.Mono;
 
@@ -32,13 +26,10 @@ import reactor.core.publisher.Mono;
 @Slf4j
 public class TelegramBotService extends TelegramLongPollingBot {
     private static final Logger logger = LoggerFactory.getLogger(TelegramBotService.class);
-    private final String botToken;
     private final String botUsername;
     private final KafkaProducerService kafkaProducer;
     private final BotCommand botCommand;
-    private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
     private final UserService userService;
-    private final String maskedChatId;
 
     @Autowired
     public TelegramBotService(
@@ -50,12 +41,10 @@ public class TelegramBotService extends TelegramLongPollingBot {
         super(botToken);
         logger.info("Initializing TelegramBotService with username: {}", botUsername);
         try {
-            this.botToken = botToken;
             this.botUsername = botUsername;
             this.kafkaProducer = kafkaProducer;
             this.botCommand = botCommand;
             this.userService = userService;
-            this.maskedChatId = ChatIdMasker.maskChatId(botUsername);
             logger.info("TelegramBotService initialized successfully");
         } catch (Exception e) {
             logger.error("Failed to initialize TelegramBotService: {}", e.getMessage(), e);
@@ -185,26 +174,6 @@ public class TelegramBotService extends TelegramLongPollingBot {
         }
     }
 
-    /**
-     * Обрабатывает текстовое сообщение.
-     * Проверяет, является ли сообщение командой, и обрабатывает его соответственно.
-     *
-     * @param message Текстовое сообщение
-     * @return Mono<Void>
-     */
-    private Mono<Void> handleTextMessage(Message message) {
-        String text = message.getText();
-        String chatId = message.getChatId().toString();
-        
-        if (text.startsWith("/")) {
-            return processCommand(text, chatId)
-                .then();
-        }
-        
-        return Mono.just(botCommand.handlerQ())
-            .flatMap(response -> sendResponseAsync(chatId, response))
-            .then();
-    }
 
     /**
      * Обрабатывает команду.
@@ -396,16 +365,6 @@ public class TelegramBotService extends TelegramLongPollingBot {
         }
     }
 
-
-    private Mono<Void> processCommand(String text, String chatId) {
-        Message message = new Message();
-        message.setText(text);
-        Chat chat = new Chat();
-        chat.setId(Long.parseLong(chatId));
-        message.setChat(chat);
-        return processCommand(text, chatId)
-            .then();
-    }
 
     private Mono<Void> parseAndProcessCommand(String text, String chatId) {
         String[] parts = text.split("\\s+", 2);

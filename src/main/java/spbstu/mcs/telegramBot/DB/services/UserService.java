@@ -5,12 +5,8 @@ import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Updates;
 import org.bson.Document;
 import org.bson.conversions.Bson;
-import org.bson.types.ObjectId;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
-import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -18,8 +14,6 @@ import spbstu.mcs.telegramBot.DB.DTO.UserPortfolioView;
 import spbstu.mcs.telegramBot.model.Notification;
 import spbstu.mcs.telegramBot.model.Portfolio;
 import spbstu.mcs.telegramBot.model.User;
-import spbstu.mcs.telegramBot.util.ChatIdMasker;
-import spbstu.mcs.telegramBot.DB.repositories.UserRepository;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.*;
@@ -41,20 +35,14 @@ import java.util.stream.Collectors;
 @Service
 @Slf4j
 public class UserService {
-    private final MongoTemplate mongoTemplate;
     private final MongoCollection<Document> userCollection;
     private PortfolioService portfolioService;
     private NotificationService notificationService;
-    private final UserRepository userRepository;
     private static final Set<String> PUBLIC_COMMANDS = new HashSet<>(Arrays.asList("/start", "/help"));
 
     @Autowired
-    public UserService(MongoTemplate mongoTemplate, 
-                      MongoCollection<Document> userCollection,
-                      UserRepository userRepository) {
-        this.mongoTemplate = mongoTemplate;
+    public UserService(MongoCollection<Document> userCollection) {
         this.userCollection = userCollection;
-        this.userRepository = userRepository;
         log.info("UserService initialized with MongoDB connection");
     }
     
@@ -108,10 +96,10 @@ public class UserService {
         updates.add(Updates.addToSet("portfolioIds", portfolioId));
         
         return Mono.fromRunnable(() -> {
-            userCollection.updateOne(
-                Filters.eq("chatId", chatId),
-                Updates.combine(updates)
-            );
+                userCollection.updateOne(
+                    Filters.eq("chatId", chatId),
+                    Updates.combine(updates)
+                );
         })
         .then()
         .doOnError(error -> log.error("Error adding portfolio to user: {}", error.getMessage()));
@@ -298,7 +286,9 @@ public class UserService {
         doc.append("chatId", user.getChatId())
            .append("hasStarted", user.isHasStarted())
            .append("portfolioIds", user.getPortfolioIds())
-           .append("notificationIds", user.getNotificationIds());
+           .append("notificationIds", user.getNotificationIds())
+           .append("currentCrypto", user.getCurrentCrypto())
+           .append("currentFiat", user.getCurrentFiat());
         return doc;
     }
 
@@ -311,6 +301,8 @@ public class UserService {
         user.setHasStarted(doc.getBoolean("hasStarted", false));
         user.setPortfolioIds(doc.getList("portfolioIds", String.class));
         user.setNotificationIds(doc.getList("notificationIds", String.class));
+        user.setCurrentCrypto(doc.getString("currentCrypto"));
+        user.setCurrentFiat(doc.getString("currentFiat"));
         return user;
     }
 
@@ -321,7 +313,7 @@ public class UserService {
      */
     public Mono<Boolean> isPublicCommand(String command) {
         return Mono.just(PUBLIC_COMMANDS.contains(command.toLowerCase()));
-    }
+                }
 
     /**
      * Проверяет авторизацию пользователя
@@ -342,7 +334,7 @@ public class UserService {
                     .defaultIfEmpty(false);
             })
             .doOnError(error -> log.error("Error checking authorization: {}", error.getMessage()));
-    }
+                }
 
     /**
      * Получает сообщение об ошибке авторизации
