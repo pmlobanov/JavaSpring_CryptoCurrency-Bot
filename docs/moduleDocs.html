@@ -93,13 +93,13 @@
 <!-- Application Section -->
 <h2>Application</h2>
 <div class="diagram">
-    <img src="images/diagrams/diagram_1.png" alt="Диаграмма Application">
+    <img src="images/diagrams/components.png" alt="Диаграмма Application">
 </div>
 
 <!-- DB Section -->
 <h2>DB</h2>
 <div class="diagram">
-    <img src="images/diagrams/DB_diagram.png" alt="Диаграмма DB">
+    <img src="images/diagrams/module-DB.png" alt="Диаграмма DB">
 </div>
 <table>
     <tr><th>Base package</th><td><span class="package">spbstu.mcs.telegramBot.DB</span></td></tr>
@@ -125,62 +125,16 @@
 <!-- Config Section -->
 <h2>Config</h2>
 <div class="diagram">
-    <img src="images/diagrams/config_diagram.png" alt="Диаграмма Config">
+    <img src="images/diagrams/module-config.png" alt="Диаграмма Config">
 </div>
 <table>
     <tr><th>Base package</th><td><span class="package">spbstu.mcs.telegramBot.config</span></td></tr>
     <tr>
         <th>Spring components</th>
         <td>
-            <div class="component">s.m.t.c.AppConfigurations</div>
-            <div class="component">s.m.t.c.ApiConfiguration</div>
-            <div class="component">s.m.t.c.KafkaConfiguration</div>
-            <div class="component">s.m.t.c.SecurityConfiguration</div>
-            <div class="component">s.m.t.c.TelegramConfiguration</div>
-            <div class="component">s.m.t.c.WebConfiguration</div>
-            <div class="component">s.m.t.c.ServerProperties</div>
             <div class="component">s.m.t.c.LoggingConfig</div>
             <div class="component">s.m.t.c.SchedulingConfig</div>
             <div class="component">s.m.t.c.VaultConfig</div>
-        </td>
-    </tr>
-    <tr>
-        <th>Bean references</th>
-        <td class="bean-ref">
-            <div class="component">s.m.t.s.AdminAuthMiddleware (in Service)</div>
-            <div class="component">s.m.t.s.EncryptionService (in Security)</div>
-            <div class="component">s.m.t.D.services.UserService (in DB)</div>
-            <div class="component">s.m.t.D.services.AdminService (in DB)</div>
-        </td>
-    </tr>
-    <tr>
-        <th>Events listened to</th>
-        <td>
-            <div class="component">o.s.c.e.ContextStoppedEvent</div>
-        </td>
-    </tr>
-</table>
-
-<!-- Controller Section -->
-<h2>Controller</h2>
-<div class="diagram">
-    <img src="images/diagrams/controller_diagram.png" alt="Диаграмма Controller">
-</div>
-<table>
-    <tr><th>Base package</th><td><span class="package">spbstu.mcs.telegramBot.controller</span></td></tr>
-    <tr>
-        <th>Spring components</th>
-        <td>
-            <div class="component">s.m.t.c.AdminController</div>
-        </td>
-    </tr>
-    <tr>
-        <th>Bean references</th>
-        <td class="bean-ref">
-            <div class="component">s.m.t.D.services.AdminService (in DB)</div>
-            <div class="component">s.m.t.D.services.UserService (in DB)</div>
-            <div class="component">s.m.t.s.AdminAuthMiddleware (in Service)</div>
-            <div class="component">s.m.t.D.services.ApiKeyService (in DB)</div>
         </td>
     </tr>
 </table>
@@ -188,7 +142,7 @@
 <!-- CryptoApi Section -->
 <h2>CryptoApi</h2>
 <div class="diagram">
-    <img src="images/diagrams/cryptoApi_diagram.png" alt="Диаграмма CryptoApi">
+    <img src="images/diagrams/module-cryptoApi.png" alt="Диаграмма CryptoApi">
 </div>
 <table>
     <tr><th>Base package</th><td><span class="package">spbstu.mcs.telegramBot.cryptoApi</span></td></tr>
@@ -205,6 +159,7 @@
     <tr>
         <th>Bean references</th>
         <td class="bean-ref">
+            <div class="component">s.m.t.D.services.UserService (in DB)</div>
             <div class="component">s.m.t.D.services.PortfolioService (in DB)</div>
         </td>
     </tr>
@@ -213,7 +168,7 @@
 <!-- Model Section -->
 <h2>Model</h2>
 <div class="diagram">
-    <img src="images/diagrams/model_diagram.png" alt="Диаграмма Model">
+    <img src="images/diagrams/module-model.png" alt="Диаграмма Model">
 </div>
 <table>
     <tr><th>Base package</th><td><span class="package">spbstu.mcs.telegramBot.model</span></td></tr>
@@ -222,7 +177,7 @@
 <!-- Security Section -->
 <h2>Security</h2>
 <div class="diagram">
-    <img src="images/diagrams/security_diagram.png" alt="Диаграмма Security">
+    <img src="images/diagrams/module-security.png" alt="Диаграмма Security">
 </div>
 <table>
     <tr><th>Base package</th><td><span class="package">spbstu.mcs.telegramBot.security</span></td></tr>
@@ -238,16 +193,46 @@
 <!-- Server Section -->
 <h2>Server</h2>
 <div class="diagram">
-    <img src="images/diagrams/server_diagram.png" alt="Диаграмма Server">
+    <img src="images/diagrams/module-server.png" alt="Диаграмма Server">
 </div>
 <table>
     <tr><th>Base package</th><td><span class="package">spbstu.mcs.telegramBot.server</span></td></tr>
+    <tr>
+        <th>Spring components</th>
+        <td>
+            <div class="component">s.m.t.s.AppConfigurations</div>
+            <div class="component">s.m.t.s.ApiConfiguration</div>
+            <div class="component">s.m.t.s.KafkaConfiguration</div>
+            <div class="component">s.m.t.s.SecurityConfiguration</div>
+            <div class="component">s.m.t.s.TelegramConfiguration</div>
+            <div class="component">s.m.t.s.WebConfiguration</div>
+            <div class="component">s.m.t.s.ServerProperties</div>
+            <div class="component">s.m.t.s.ServerApp</div>
+        </td>
+    </tr>
+    <tr>
+        <th>Bean references</th>
+        <td class="bean-ref">
+            <div class="component">s.m.t.c.VaultConfig (in Config)</div>
+            <div class="component">s.m.t.D.services.AdminService (in DB)</div>
+            <div class="component">s.m.t.D.services.UserService (in DB)</div>
+            <div class="component">s.m.t.s.EncryptionService (in Security)</div>
+            <div class="component">s.m.t.D.services.ApiKeyService (in DB)</div>
+            <div class="component">s.m.t.c.PriceFetcher (in CryptoApi)</div>
+        </td>
+    </tr>
+    <tr>
+        <th>Events listened to</th>
+        <td>
+            <div class="component">o.s.c.e.ContextStoppedEvent</div>
+        </td>
+    </tr>
 </table>
 
 <!-- Service Section -->
 <h2>Service</h2>
 <div class="diagram">
-    <img src="images/diagrams/service_diagram.png" alt="Диаграмма Service">
+    <img src="images/diagrams/module-service.png" alt="Диаграмма Service">
 </div>
 <table>
     <tr><th>Base package</th><td><span class="package">spbstu.mcs.telegramBot.service</span></td></tr>
@@ -259,21 +244,16 @@
             <div class="component">s.m.t.s.BotCommand</div>
             <div class="component">s.m.t.s.KafkaConsumerService</div>
             <div class="component">s.m.t.s.KafkaProducerService</div>
-            <div class="component">s.m.t.s.PortfolioManagement</div>
             <div class="component">s.m.t.s.TelegramBotService</div>
-
-            <div class="service">Others</div>
-            <div class="component">s.m.t.s.AdminAuthMiddleware</div>
         </td>
     </tr>
     <tr>
         <th>Bean references</th>
         <td class="bean-ref">
-            <div class="component">s.m.t.D.services.AdminService (in DB)</div>
-            <div class="component">s.m.t.D.services.UserService (in DB)</div>
             <div class="component">s.m.t.c.CurrencyConverter (in CryptoApi)</div>
             <div class="component">s.m.t.c.PriceFetcher (in CryptoApi)</div>
             <div class="component">s.m.t.D.services.NotificationService (in DB)</div>
+            <div class="component">s.m.t.D.services.UserService (in DB)</div>
             <div class="component">s.m.t.c.CryptoInformation (in CryptoApi)</div>
             <div class="component">s.m.t.D.services.PortfolioService (in DB)</div>
             <div class="component">s.m.t.c.CryptoPortfolioManager (in CryptoApi)</div>
@@ -284,7 +264,7 @@
 <!-- Util Section -->
 <h2>Util</h2>
 <div class="diagram">
-    <img src="images/diagrams/util_diagram.png" alt="Диаграмма Util">
+    <img src="images/diagrams/module-util.png" alt="Диаграмма Util">
 </div>
 <table>
     <tr><th>Base package</th><td><span class="package">spbstu.mcs.telegramBot.util</span></td></tr>
