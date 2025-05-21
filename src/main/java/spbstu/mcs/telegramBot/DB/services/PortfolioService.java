@@ -111,9 +111,7 @@ public class PortfolioService {
     }
 
     public Portfolio addCryptoToPortfolio(String portfolioId, Currency.Crypto crypto, BigDecimal amount) {
-        Portfolio portfolio = portfolioRepository.findById(portfolioId)
-            .orElseThrow(() -> new RuntimeException("Портфель не найден"));
-
+        // Validate amount constraints first
         if (amount.compareTo(BigDecimal.ZERO) <= 0) {
             throw new IllegalArgumentException("Количество должно быть положительным");
         }
@@ -132,10 +130,15 @@ public class PortfolioService {
             throw new IllegalArgumentException("Неподдерживаемая криптовалюта");
         }
 
+        // Get existing portfolio or create new one
+        Portfolio portfolio = portfolioRepository.findById(portfolioId)
+            .orElseThrow(() -> new RuntimeException("Портфель не найден"));
+
         // Calculate new total amount
         BigDecimal currentAmount = portfolio.getCount() == null ? BigDecimal.ZERO : portfolio.getCount();
         BigDecimal newTotal = currentAmount.add(amount);
 
+        // Validate total amount against maximum
         if (newTotal.compareTo(maxAmount) > 0) {
             StringBuilder limits = new StringBuilder();
             limits.append("Ограничения по максимальному количеству:\n");
@@ -155,12 +158,14 @@ public class PortfolioService {
             ));
         }
 
-        if (portfolio.getCryptoCurrency() == null || portfolio.getCryptoCurrency() == crypto) {
-            portfolio.setCryptoCurrency(crypto);
-            portfolio.setCount(newTotal);
-        } else {
+        // Validate crypto currency
+        if (portfolio.getCryptoCurrency() != null && portfolio.getCryptoCurrency() != crypto) {
             throw new IllegalArgumentException("Портфель уже содержит другую криптовалюту");
         }
+
+        // Update portfolio
+        portfolio.setCryptoCurrency(crypto);
+        portfolio.setCount(newTotal);
 
         return portfolioRepository.save(portfolio);
     }
@@ -303,5 +308,20 @@ public class PortfolioService {
 
     public void deleteById(String testPortfolioId) {
         this.portfolioRepository.deleteById(testPortfolioId);
+    }
+
+    /**
+     * Получает максимальное допустимое количество для криптовалюты.
+     *
+     * @param crypto криптовалюта
+     * @return максимальное допустимое количество
+     * @throws IllegalArgumentException если криптовалюта не поддерживается
+     */
+    public BigDecimal getMaxAmount(Currency.Crypto crypto) {
+        BigDecimal maxAmount = maxAmounts.get(crypto);
+        if (maxAmount == null) {
+            throw new IllegalArgumentException("Неподдерживаемая криптовалюта");
+        }
+        return maxAmount;
     }
 }

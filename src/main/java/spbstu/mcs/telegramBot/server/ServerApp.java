@@ -65,13 +65,6 @@ public class ServerApp {
 
     public void start() {
         try {
-            // Проверяем существование файла логов
-            File logFile = new File(logFilePath);
-            if (!logFile.exists()) {
-                logger.error("Log file does not exist at: {}", logFilePath);
-                throw new IOException("Log file not found: " + logFilePath);
-            }
-            
             server = HttpServer.create(new InetSocketAddress(serverProperties.host(), serverProperties.port()), 0);
             
             // Health check endpoint - accessible without authentication
@@ -358,9 +351,7 @@ public class ServerApp {
                         userService.getAllUsers()
                             .map(user -> Map.of(
                                 "chatId", user.getChatId(),
-                                "hasStarted", user.isHasStarted(),
-                                "notificationIds", user.getNotificationIds(),
-                                "portfolioIds", user.getPortfolioIds()
+                                "hasStarted", user.isHasStarted()
                             ))
                             .collectList()
                             .subscribe(users -> {
@@ -389,8 +380,6 @@ public class ServerApp {
                                     logger.error("Failed to write error response: {}", ioe.getMessage(), ioe);
                                 }
                             });
-                        
-                        // Note: We don't close the response here since it will be closed in the subscribe() callback
                         
                     } catch (Exception e) {
                         logger.error("Error in users handler: {}", e.getMessage(), e);
@@ -427,14 +416,6 @@ public class ServerApp {
                     
                     String finalToken = token;
                     try {
-                        // Get the log file path
-                        File logFile = new File(logFilePath);
-                        
-                        if (!logFile.exists() || !logFile.isFile()) {
-                            sendResponse(exchange, 404, errorResponse(404, "Log file not found"));
-                            return;
-                        }
-                        
                         // Process request reactively
                         validateApiToken(finalToken)
                             .flatMap(adminInfo -> {
@@ -463,26 +444,36 @@ public class ServerApp {
                                 
                                 // Valid token, proceed with log file
                                 return Mono.fromCallable(() -> {
+                                    // Get the log file path
+                                    File logFile = new File(logFilePath);
+                                    logger.info("Attempting to read log file from path: {}", logFile.getAbsolutePath());
+                                    logger.info("Log file exists: {}, is file: {}, can read: {}", 
+                                        logFile.exists(), logFile.isFile(), logFile.canRead());
+                                    
+                                    if (!logFile.exists() || !logFile.isFile()) {
+                                        throw new IOException("Log file not found at path: " + logFile.getAbsolutePath());
+                                    }
+                                    
                                     try {
-                        byte[] fileBytes = Files.readAllBytes(logFile.toPath());
-                        // Set headers for file download
-                        exchange.getResponseHeaders().set("Content-Type", "text/plain");
-                        exchange.getResponseHeaders().set("Content-Disposition", "attachment; filename=\"application.log\"");
-                        exchange.getResponseHeaders().set("Content-Length", String.valueOf(fileBytes.length));
-                        // Send the file
-                        exchange.sendResponseHeaders(200, fileBytes.length);
-                        OutputStream outputStream = exchange.getResponseBody();
-                        outputStream.write(fileBytes);
-                        outputStream.close();
+                                        byte[] fileBytes = Files.readAllBytes(logFile.toPath());
+                                        // Set headers for file download
+                                        exchange.getResponseHeaders().set("Content-Type", "text/plain");
+                                        exchange.getResponseHeaders().set("Content-Disposition", "attachment; filename=\"application.log\"");
+                                        exchange.getResponseHeaders().set("Content-Length", String.valueOf(fileBytes.length));
+                                        // Send the file
+                                        exchange.sendResponseHeaders(200, fileBytes.length);
+                                        OutputStream outputStream = exchange.getResponseBody();
+                                        outputStream.write(fileBytes);
+                                        outputStream.close();
                                         return true; // Signal success
-                                    } catch (Exception e) {
-                        // Даже при ошибке отправки файла возвращаем статус 200, но с сообщением об ошибке
-                        exchange.sendResponseHeaders(200, 0);
-                        OutputStream outputStream = exchange.getResponseBody();
-                        outputStream.write(("Ошибка при отправке логов: " + e.getMessage()).getBytes());
-                        outputStream.close();
+                                    } catch (IOException e) {
+                                        // Даже при ошибке отправки файла возвращаем статус 200, но с сообщением об ошибке
+                                        exchange.sendResponseHeaders(200, 0);
+                                        OutputStream outputStream = exchange.getResponseBody();
+                                        outputStream.write(("Ошибка при отправке логов: " + e.getMessage()).getBytes());
+                                        outputStream.close();
                                         logger.error("Error sending log file: {}", e.getMessage(), e);
-                        return false;
+                                        return false;
                                     }
                                 });
                             })
@@ -493,6 +484,8 @@ public class ServerApp {
                                         int statusCode = 500;
                                         if (error instanceof SecurityException) {
                                             statusCode = 401;
+                                        } else if (error instanceof IOException) {
+                                            statusCode = 404;
                                         }
                                         sendResponse(exchange, statusCode, errorResponse(statusCode, error.getMessage()));
                                     } catch (IOException e) {

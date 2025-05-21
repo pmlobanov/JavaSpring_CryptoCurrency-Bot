@@ -34,7 +34,8 @@ public class VaultConfig implements ApplicationContextAware, BeanPostProcessor {
     private ApplicationContext applicationContext;
 
     public VaultConfig() {
-        String vaultUrl = System.getenv().getOrDefault("VAULT_ADDR", "http://vault:8200");
+        String vaultPort = System.getenv().getOrDefault("VAULT_PORT", "8200");
+        String vaultUrl = "http://vault:" + vaultPort;
         String token = System.getenv().getOrDefault("VAULT_TOKEN", "root");
         
         logger.info("Initializing Vault connection with URL: {}", vaultUrl);
@@ -47,10 +48,7 @@ public class VaultConfig implements ApplicationContextAware, BeanPostProcessor {
             String scheme = uri.getScheme();
             endpoint.setScheme(scheme);
             endpoint.setHost(uri.getHost());
-            
-            // Use the port from URI or default to 8200
-            int port = uri.getPort() != -1 ? uri.getPort() : 8200;
-            endpoint.setPort(port);
+            endpoint.setPort(Integer.parseInt(vaultPort));
             
             logger.info("Connecting to Vault at {}://{}:{} with token: {}", 
                     scheme, endpoint.getHost(), endpoint.getPort(), 

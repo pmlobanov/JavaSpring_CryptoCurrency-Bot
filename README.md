@@ -74,9 +74,9 @@ Telegram-бот для отслеживания текущей цены для �
 ### Администрирование и проверка состояния бота
 | №  | Команда | Описание |
 |----|---------|----------|
-| 18 | `curl -X GET http://localhost:8080/healthcheck` | Проверка состояния (healthcheck)|
-| 19 | `curl -X GET \  http://localhost:8080/admin/users \  -H "Authorization: Bearer YOUR_API_KEY_HERE"` | Авторизация и получение списка пользователей администратором|
-| 20 |` curl -X GET \ http://localhost:8080/admin/logs \  -H "Authorization: Bearer YOUR_API_KEY_HERE"` | Авторизация и получение логов приложения администратором|
+| 18 | `curl -X GET http://localhost:INSERT_SERVER_PORT/healthcheck` | Проверка состояния (healthcheck)|
+| 19 | `curl -X GET \  http://localhost:INSERT_SERVER_PORT/admin/users \  -H "Authorization: Bearer YOUR_API_KEY_HERE"` | Авторизация и получение списка пользователей администратором|
+| 20 |` curl -X GET \ http://localhost:INSERT_SERVER_PORT/admin/logs \  -H "Authorization: Bearer YOUR_API_KEY_HERE"` | Авторизация и получение логов приложения администратором|
 
 
 ## Установка и запуск
@@ -95,15 +95,26 @@ Telegram-бот для отслеживания текущей цены для �
     ```
 3. Создайте такой файл .env и поместить его в корень проекта:
     ```
-    # Существующие переменные MongoDB
-    MONGO_INITDB_ROOT_USERNAME=YOURROOTUSERNAME
-    MONGO_INITDB_ROOT_PASSWORD=YOURROOTUSERPASSWORD
+    # MongoDB configuration
+    MONGO_INITDB_ROOT_USERNAME=INSERT_ROOT_USERNAME
+    MONGO_INITDB_ROOT_PASSWORD=INSERT_ROOT_PASSWORD
     MONGO_INITDB_DATABASE=BitBotDB
-    
-    # Новые переменные для Vault
-    VAULT_DEV_ROOT_TOKEN_ID=YOURROOTUSERTOKENID
-    VAULT_ADDR=http://vault:8200
-    VAULT_TOKEN=YOURROOTTOKEN
+    MONGO_PORT=INSERT_PORT1
+
+    # Vault configuration
+    VAULT_DEV_ROOT_TOKEN_ID=INSERT_ROOT_TOKEN_ID
+    VAULT_TOKEN=INSERT_VAULT_TOKEN
+    VAULT_PORT=INSERT_PORT2
+
+    # Server configuration
+    SERVER_PORT=INSERT_PORT3
+
+    # Kafka configuration
+    KAFKA_PORT=INSERT_PORT4
+    KAFKA_INTERNAL_PORT=INSERT_PORT5
+
+    # Zookeeper configuration
+    ZOOKEEPER_PORT=INSERT_PORT6
     ```
 4. Отчистите и пересоздайте файл fatJar командой:
     ```bash
@@ -318,4 +329,3 @@ Telegram-бот для отслеживания текущей цены для �
 | refactor | Правки кода без исправления ошибок или добавления новых функций |
 | revert   | Откат на предыдущие коммиты                                     |
 | style	   | Правки по кодстайлу (табы, отступы, точки, запятые и т.д.)      |
-

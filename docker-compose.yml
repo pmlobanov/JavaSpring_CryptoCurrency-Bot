@@ -1,60 +1,54 @@
+version: '3.8'
+
 services:
   zookeeper:
-    image: zookeeper:3.8
+    image: confluentinc/cp-zookeeper:latest
     ports:
-      - "2181:2181"
+      - "${ZOOKEEPER_PORT:-2181}:${ZOOKEEPER_PORT:-2181}"
     environment:
-      ZOO_MY_ID: 1
-      ZOO_SERVERS: server.1=zookeeper:2888:3888;2181
+      ZOOKEEPER_CLIENT_PORT: ${ZOOKEEPER_PORT:-2181}
+      ZOOKEEPER_TICK_TIME: 2000
     networks:
       - app-network
 
   kafka:
-    image: bitnami/kafka:3.7
+    image: confluentinc/cp-kafka:latest
     ports:
-      - "9092:9092"
-      - "29092:29092"
+      - "${KAFKA_PORT}:${KAFKA_PORT}"
+      - "${KAFKA_INTERNAL_PORT}:${KAFKA_INTERNAL_PORT}"
     environment:
-      # Явное указание режима с Zookeeper
-      KAFKA_MODE: "zookeeper"
-      KAFKA_CFG_ZOOKEEPER_CONNECT: "zookeeper:2181"
-
-      # Полная конфигурация слушателей
-      KAFKA_CFG_LISTENERS: "PLAINTEXT://:9092,PLAINTEXT_HOST://:29092"
-      KAFKA_CFG_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092"
-      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
-      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
-
-      # Разрешение незащищенных соединений для разработки
-      ALLOW_PLAINTEXT_LISTENER: "yes"
-
-      # Автосоздание топиков
-      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:${ZOOKEEPER_PORT}
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:${KAFKA_INTERNAL_PORT},PLAINTEXT_HOST://localhost:${KAFKA_PORT}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:${KAFKA_INTERNAL_PORT},PLAINTEXT_HOST://0.0.0.0:${KAFKA_PORT}
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
     depends_on:
       - zookeeper
     networks:
       - app-network
 
   mongodb:
-    image: mongo:5.0
+    image: mongo:latest
     container_name: mongodb
     restart: always
     ports:
-      - "27017:27017"
+      - "${MONGO_PORT}:${MONGO_PORT}"
     environment:
       - MONGO_INITDB_ROOT_USERNAME=${MONGO_INITDB_ROOT_USERNAME}
       - MONGO_INITDB_ROOT_PASSWORD=${MONGO_INITDB_ROOT_PASSWORD}
       - MONGO_INITDB_DATABASE=${MONGO_INITDB_DATABASE}
     volumes:
-      - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
       - mongodb_data:/data/db
+      - ./mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
     healthcheck:
-      test: mongo --eval 'db.runCommand("ping").ok' --quiet mongodb:27017/admin --username ${MONGO_INITDB_ROOT_USERNAME} --password ${MONGO_INITDB_ROOT_PASSWORD} || exit 1
+      test: mongo --eval 'db.runCommand("ping").ok' --quiet mongodb:${MONGO_PORT}/admin --username ${MONGO_INITDB_ROOT_USERNAME} --password ${MONGO_INITDB_ROOT_PASSWORD} || exit 1
       interval: 10s
       timeout: 10s
       retries: 5
       start_period: 40s
-    command: ["--auth"]
+    command: ["--auth", "--port", "${MONGO_PORT}"]
     networks:
       - app-network
 
@@ -62,16 +56,17 @@ services:
     image: hashicorp/vault:1.15
     container_name: vault
     ports:
-      - "8200:8200"
+      - "${VAULT_PORT}:${VAULT_PORT}"
     environment:
-      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_DEV_ROOT_TOKEN_ID}
-      VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+      - VAULT_DEV_ROOT_TOKEN_ID=${VAULT_TOKEN}
+      - VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:${VAULT_PORT}
     cap_add:
       - IPC_LOCK
     volumes:
       - vault_data:/vault/file
     networks:
       - app-network
+    command: server -dev
 
   vault-init:
     image: hashicorp/vault:1.15
@@ -79,8 +74,12 @@ services:
       - vault
     entrypoint: ["sh", "./vault-init.sh"]
     environment:
-      VAULT_ADDR: ${VAULT_ADDR}
-      VAULT_TOKEN: ${VAULT_TOKEN}
+      - VAULT_ADDR=http://vault:${VAULT_PORT}
+      - VAULT_TOKEN=${VAULT_TOKEN}
+      - VAULT_PORT=${VAULT_PORT}
+      - KAFKA_PORT=${KAFKA_PORT}
+      - KAFKA_INTERNAL_PORT=${KAFKA_INTERNAL_PORT}
+      - MONGO_PORT=${MONGO_PORT}
     volumes:
       - ./vault-init.sh:/vault-init.sh:ro
     networks:
@@ -88,22 +87,25 @@ services:
     restart: "on-failure"
 
   app:
-    build:
-      context: .
-      args:
-        JAR_TASK: fatJar
+    build: .
+    ports:
+      - "${SERVER_PORT}:${SERVER_PORT}"
+    environment:
+      - SERVER_PORT=${SERVER_PORT}
+      - VAULT_PORT=${VAULT_PORT}
+      - VAULT_TOKEN=${VAULT_TOKEN}
+      - MONGO_PORT=${MONGO_PORT}
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_INITDB_ROOT_USERNAME}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_INITDB_ROOT_PASSWORD}
+      - MONGO_INITDB_DATABASE=${MONGO_INITDB_DATABASE}
+    volumes:
+      - ./logs:/app/logs
     depends_on:
-      - vault
       - mongodb
       - kafka
+      - vault
     networks:
       - app-network
-    ports:
-      - "8080:8080"
-    environment:
-      VAULT_ADDR: "http://vault:8200"
-    volumes:
-      - ./logs:/logs
     restart: "on-failure"
 
 networks:

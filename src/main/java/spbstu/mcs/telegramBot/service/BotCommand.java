@@ -1072,14 +1072,14 @@ public class BotCommand {
             List<Portfolio> portfolios = portfolioService.getPortfoliosByChatId(chatId);
             
             // Находим существующий портфель или создаем новый
-            Portfolio portfolio = portfolios.stream()
+            final Portfolio initialPortfolio = portfolios.stream()
                 .filter(p -> p.getCryptoCurrency() != null && p.getCryptoCurrency().equals(crypto))
                 .findFirst()
                 .orElseGet(() -> {
                     Portfolio newPortfolio = new Portfolio(chatId);
                     newPortfolio.setCryptoCurrency(crypto);
                     newPortfolio.setCount(BigDecimal.ZERO);
-                    return portfolioService.save(newPortfolio);
+                    return newPortfolio; // Don't save to DB yet
                 });
 
             return userService.getUserByChatId(chatId)
@@ -1099,8 +1099,36 @@ public class BotCommand {
                                 .setScale(2, RoundingMode.HALF_UP);
                             
                             try {
+                                // Проверяем ограничения перед добавлением
+                                BigDecimal newTotal = initialPortfolio.getCount().add(amount);
+                                BigDecimal maxLimit = getMaxLimitForCrypto(crypto);
+                                if (newTotal.compareTo(maxLimit) > 0) {
+                                    return Mono.just(String.format("❌ Превышено максимальное количество для %s\n" +
+                                            "Текущее количество в портфеле: %s %s\n" +
+                                            "Попытка добавить: %s %s\n" +
+                                            "Максимально допустимое количество: %s %s\n\n" +
+                                            "Ограничения по максимальному количеству:\n" +
+                                            "- ETH: 10000\n" +
+                                            "- ADA: 1000000\n" +
+                                            "- LTC: 100000\n" +
+                                            "- BTC: 1000\n" +
+                                            "- NEAR: 1000000\n" +
+                                            "- XRP: 1000000\n" +
+                                            "- SOL: 100000\n" +
+                                            "- DOGE: 10000000\n" +
+                                            "- AVAX: 100000",
+                                            crypto.getCode(),
+                                            initialPortfolio.getCount().setScale(6, RoundingMode.FLOOR), crypto.getCode(),
+                                            amount.setScale(6, RoundingMode.FLOOR), crypto.getCode(),
+                                            maxLimit.setScale(6, RoundingMode.FLOOR), crypto.getCode()));
+                                }
+
+                                // Если это новый портфель, сохраняем его в БД
+                                final Portfolio savedPortfolio = initialPortfolio.getId() == null ? 
+                                    portfolioService.save(initialPortfolio) : initialPortfolio;
+
                                 // Добавляем криптовалюту в портфель
-                                Portfolio updatedPortfolio = portfolioService.addCryptoToPortfolio(portfolio.getId(), crypto, amount);
+                                Portfolio updatedPortfolio = portfolioService.addCryptoToPortfolio(savedPortfolio.getId(), crypto, amount);
                                 
                                 // Рассчитываем общую стоимость в выбранной валюте
                                 BigDecimal totalValue = amount.multiply(currentPrice);
@@ -1138,6 +1166,20 @@ public class BotCommand {
             log.error("Ошибка при добавлении криптовалюты", e);
             return Mono.just("❌ Произошла ошибка при добавлении криптовалюты");
         }
+    }
+
+    private BigDecimal getMaxLimitForCrypto(Currency.Crypto crypto) {
+        return switch (crypto) {
+            case ETH -> new BigDecimal("10000");
+            case ADA -> new BigDecimal("1000000");
+            case LTC -> new BigDecimal("100000");
+            case BTC -> new BigDecimal("1000");
+            case NEAR -> new BigDecimal("1000000");
+            case XRP -> new BigDecimal("1000000");
+            case SOL -> new BigDecimal("100000");
+            case DOGE -> new BigDecimal("10000000");
+            case AVAX -> new BigDecimal("100000");
+        };
     }
 
     /**
@@ -1178,6 +1220,27 @@ public class BotCommand {
                 .filter(p -> p.getCryptoCurrency() != null && p.getCryptoCurrency().equals(crypto))
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException("Портфель не найден"));
+
+            // Проверяем, не превышает ли запрошенное количество максимальный лимит
+            BigDecimal maxLimit = getMaxLimitForCrypto(crypto);
+            if (amount.compareTo(maxLimit) > 0) {
+                return Mono.just(String.format("❌ Превышено максимальное количество для %s\n" +
+                        "Попытка удалить: %s %s\n" +
+                        "Максимально допустимое количество: %s %s\n\n" +
+                        "Ограничения по максимальному количеству:\n" +
+                        "- ETH: 10000\n" +
+                        "- ADA: 1000000\n" +
+                        "- LTC: 100000\n" +
+                        "- BTC: 1000\n" +
+                        "- NEAR: 1000000\n" +
+                        "- XRP: 1000000\n" +
+                        "- SOL: 100000\n" +
+                        "- DOGE: 10000000\n" +
+                        "- AVAX: 100000",
+                        crypto.getCode(),
+                        amount.setScale(6, RoundingMode.FLOOR), crypto.getCode(),
+                        maxLimit.setScale(6, RoundingMode.FLOOR), crypto.getCode()));
+            }
 
             // Проверяем, достаточно ли средств для удаления
             if (portfolio.getCount().compareTo(amount) < 0) {

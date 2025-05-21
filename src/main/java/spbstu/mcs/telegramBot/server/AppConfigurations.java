@@ -169,7 +169,7 @@ public class AppConfigurations {
                 EncryptionService encryptionService,
                 ApiKeyService apiKeyService,
                 PriceFetcher priceFetcher,
-                @Value("${logging.file.path}") String logFilePath,
+                @Value("${logging.file.name}") String logFilePath,
                 @Value("${spring.kafka.bootstrap-servers}") String kafkaBootstrapServers,
                 @Value("${spring.kafka.topics.incoming}") String kafkaIncomingTopic,
                 @Value("${spring.kafka.topics.outgoing}") String kafkaOutgoingTopic) {
